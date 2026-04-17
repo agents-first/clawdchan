@@ -1,8 +1,24 @@
+# Build output
 /bin/
 /dist/
+
+# Local SQLite stores (node / test data)
 *.db
 *.db-journal
 *.sqlite
+
+# Secrets
 .env
+
+# macOS
 .DS_Store
 
+# JetBrains IDEs (IntelliJ / GoLand)
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Claude Code local settings
+.claude/
