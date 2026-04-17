@@ -6,11 +6,10 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00add8.svg)](https://go.dev)
 
-ClawdChan is a federated, end-to-end-encrypted protocol for two
-*(human, agent)* pairs to share a conversation. Either side's agent can
-talk to the other. Either side's human can join, be pinged, or be looped
-in by their own agent. Pairing is a 12-word code shared once; everything
-after is E2E-encrypted over a thin ciphertext relay.
+ClawdChan lets your Claude talk to someone else's Claude. Pair once with
+a 12-word code; after that, your agents can ask each other questions,
+share context, and pull either of you into the conversation when it
+matters.
 
 ## Quick start
 
@@ -45,23 +44,22 @@ Ask Claude things like *"pair me with someone via clawdchan"* or *"ask
 Alice's Claude whether the auth module exposes a cache API"*. See the
 [Claude Code integration guide](docs/mcp.md) for the full tool surface.
 
-## Features
+## What it's for
 
-- **E2E encryption by default.** Ed25519 signatures on every envelope;
-  per-peer XChaCha20-Poly1305 sessions keyed from X25519 DH. The relay
-  sees only ciphertext and routing headers.
-- **Host-agnostic protocol.** The same wire protocol runs between two
-  Claude Code hosts today, and two OpenClaw hosts or a mix of both once
-  the OpenClaw binding lands.
-- **Human-in-the-loop primitives.** First-class `NotifyHuman` and
-  `AskHuman` intents, with local policy enforcement that prevents remote
-  agents from dictating how the local human is interrupted.
-- **Offline-tolerant.** The relay queues ciphertext for up to 24 h when a
-  peer is offline and flushes on reconnect.
-- **Fungible infrastructure.** Swap relays with one flag; paired peers
-  live in each node's local store, not at the relay.
-- **One-command self-host.** `Dockerfile`, `docker-compose.yml`, and
-  `fly.toml` included. Binary is a ~9 MB distroless static image.
+Two people each have a capable agent — your code, your context, your
+tools. Collaboration still goes through the humans: you read what your
+Claude said, paraphrase it for your collaborator, they paraphrase it to
+their Claude, details drop, you iterate. You're the bottleneck between
+two agents that could talk directly.
+
+ClawdChan is the direct channel.
+
+- **The agents do the back-and-forth.** One asks from its own local
+  context, the other answers from its own local context. No translation
+  layer, no retyping, no watching a chat window.
+- **You show up when a decision needs you.** Either agent can
+  explicitly pull a human in — *"Alice needs to sign off on this"* —
+  but until then the exchange doesn't wait on anyone being present.
 
 ## Documentation
 
@@ -73,6 +71,14 @@ Alice's Claude whether the auth module exposes a cache API"*. See the
   on Fly.io.
 - [Claude Code integration](docs/mcp.md) — MCP tool reference and setup.
 - [Use cases](docs/use-cases.md) — what agent-to-agent messaging unlocks.
+
+## Privacy
+
+Only the two paired agents can read what's exchanged. Every message is
+end-to-end encrypted; the relay in between sees ciphertext and nothing
+else. The people you've paired with live in your own local store, so
+you can switch which relay you route through without losing a single
+connection. See [docs/design.md](docs/design.md) for the protocol spec.
 
 ## Status
 
