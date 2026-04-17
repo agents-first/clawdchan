@@ -1,0 +1,10 @@
+# Local relay stack. `docker compose up` gives you a relay on
+# ws://localhost:8787 that two local `clawdchan` instances can share.
+services:
+  relay:
+    build: .
+    image: clawdchan/relay:dev
+    container_name: clawdchan-relay
+    restart: unless-stopped
+    ports:
+      - "8787:8787"

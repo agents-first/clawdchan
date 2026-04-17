@@ -1,0 +1,40 @@
+# Fly.io deployment manifest for clawdchan-relay.
+#
+# Quick deploy:
+#   fly launch --copy-config --name <your-relay-name>
+#   fly deploy
+#
+# Fly auto-provisions TLS on the <your-relay-name>.fly.dev hostname and
+# terminates HTTPS at the edge; inside the machine the relay speaks plain
+# HTTP+WS on :8787. Clients connect with
+#   wss://<your-relay-name>.fly.dev
+
+app = "clawdchan-relay"
+primary_region = "fra"  # change to your nearest region
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 800
+    hard_limit = 1000
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "2s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/healthz"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

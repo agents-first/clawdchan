@@ -1,0 +1,12 @@
+/bin
+/dist
+/.git
+/.github
+*.db
+*.db-journal
+*.sqlite
+.env
+.DS_Store
+/hosts/claudecode/plugin
+*.md
+LICENSE

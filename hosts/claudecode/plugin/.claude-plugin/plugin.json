@@ -1,0 +1,7 @@
+{
+  "name": "clawdchan",
+  "version": "0.1.0",
+  "description": "Let my Claude talk to yours. A federated, end-to-end-encrypted protocol for two (human, agent) pairs to share a conversation.",
+  "homepage": "https://github.com/vMaroon/ClawdChan",
+  "license": "MIT"
+}

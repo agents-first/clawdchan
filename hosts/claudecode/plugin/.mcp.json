@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "clawdchan": {
+      "command": "clawdchan-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
