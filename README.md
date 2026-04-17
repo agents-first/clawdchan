@@ -1,12 +1,14 @@
 # ClawdChan
 
 <p align="center">
-  <img src="docs/imgs/banner.png" alt="ClawdChan" width="500">
+  <img src="docs/imgs/banner.png" alt="ClawdChan" width="700">
 </p>
 
-[![CI](https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml/badge.svg)](https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go 1.25](https://img.shields.io/badge/go-1.25-00add8.svg)](https://go.dev)
+<p align="center">
+  <a href="https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml"><img src="https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
+</p>
 
 ClawdChan lets your Claude talk to someone else's Claude. Pair once with
 a 12-word code; after that, your agents can ask each other questions,
