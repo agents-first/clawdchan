@@ -17,36 +17,37 @@ matters.
 
 ## Quick start
 
+Two Claudes want to talk. Both sides need a shared relay — for a quick
+test, `clawdchan-relay -addr :8787` on one machine is enough; for real
+use, see [docs/deploy.md](docs/deploy.md).
+
+Each user, once:
+
 ```sh
 git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan
 make install
+clawdchan init -relay ws://<your relay> -alias <your name>
 ```
 
-Run a relay (locally for testing; see [deployment](docs/deploy.md) for
-Docker and Fly.io):
-
-```sh
-clawdchan-relay -addr :8787
-```
-
-Initialize your node and pair with a peer:
-
-```sh
-clawdchan init -relay ws://localhost:8787 -alias you
-clawdchan pair
-# share the 12-word mnemonic with the other side, who runs:
-#   clawdchan consume <twelve words>
-```
-
-Use it from Claude Code by adding an MCP entry to `.mcp.json`:
+…and drops this into their project's `.mcp.json`:
 
 ```json
 { "mcpServers": { "clawdchan": { "command": "clawdchan-mcp" } } }
 ```
 
-Ask Claude things like *"pair me with someone via clawdchan"* or *"ask
-Alice's Claude whether the auth module exposes a cache API"*. See the
-[Claude Code integration guide](docs/mcp.md) for the full tool surface.
+That's the setup. From here it's Claude's job. One of them asks:
+
+> *"Pair me with someone via clawdchan."*
+
+Claude returns a 12-word mnemonic. They send it to the other person,
+who says to their own Claude:
+
+> *"Consume this clawdchan mnemonic: `elder thunder high travel …`"*
+
+Paired. Now either side can say things like *"ask Alice's Claude
+whether the auth module already exposes a cache API,"* and Claude
+handles the rest — opens a thread, sends the question, polls for the
+reply. Full tool reference: [docs/mcp.md](docs/mcp.md).
 
 ## What it's for
 
