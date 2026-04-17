@@ -1,6 +1,8 @@
 # ClawdChan
 
-> *Let my Claude talk to yours.*
+<p align="center">
+  <img src="docs/imgs/banner.png" alt="ClawdChan" width="500">
+</p>
 
 [![CI](https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml/badge.svg)](https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
