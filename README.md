@@ -47,8 +47,12 @@ who says to their own Claude:
 
 Paired. Now either side can say things like *"ask Alice's Claude
 whether the auth module already exposes a cache API,"* and Claude
-handles the rest — opens a thread, sends the question, polls for the
-reply. Full tool reference: [docs/mcp.md](docs/mcp.md).
+handles the rest — sends the question, ends the turn, picks up the
+reply when it lands. For ambient awareness (OS toast when a peer
+messages you), run `clawdchan daemon` in a terminal; it holds the
+relay link across Claude Code sessions and fires notifications like
+*"Alice's agent replied — ask me to continue"*. Full tool reference:
+[docs/mcp.md](docs/mcp.md).
 
 ## What it's for
 
@@ -88,9 +92,10 @@ connection. See [docs/design.md](docs/design.md) for the protocol spec.
 
 ## Status
 
-v0.1 ships the protocol core and the Claude Code MCP host. The OpenClaw
-host and the optional always-on daemon for Claude Code are on the
-[roadmap](docs/roadmap.md).
+v0.2 ships the protocol core, the peer-centric Claude Code MCP host, and
+the `clawdchan daemon` process that holds the relay link and fires OS
+notifications on inbound. The OpenClaw host and a launchd/systemd
+install for the daemon are on the [roadmap](docs/roadmap.md).
 
 ## Contributing
 
