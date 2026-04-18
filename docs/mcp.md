@@ -19,6 +19,13 @@ replied, ask me about it" toasts — comes from a separate background daemon.
   every login. Subcommands: `run`, `install`, `uninstall`, `status`. The
   daemon owns the relay link, ingests inbound envelopes, and fires native
   OS notifications with title + body text (and a sound on macOS/Windows).
+- **macOS note:** the daemon prefers `terminal-notifier` when installed
+  (`brew install terminal-notifier`). Without it, we fall back to
+  `osascript display notification`, which is attributed to Script Editor
+  — if Script Editor has ever been removed or never registered with
+  Notification Center, macOS silently drops those notifications despite
+  osascript returning success. terminal-notifier attributes to its own
+  bundle and registers itself on first use, so it Just Works.
 
 ## Configuration
 
