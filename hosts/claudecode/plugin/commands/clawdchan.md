@@ -17,6 +17,12 @@ capability list plus a `setup` block describing current listener presence.
 3. Only after the user confirms or declines, proceed with whatever they
    asked for.
 
+**Threads are ephemeral per Claude Code session.** `clawdchan_threads`
+only returns threads opened or active in THIS session. Threads from a
+prior CC session are no longer discoverable, even though the local
+store retains them for `clawdchan inspect`. Pairings persist; threads
+do not. When a user wants to talk to a paired peer, open a new thread.
+
 Common uses:
 
 - Pair with another person's Claude: `clawdchan_pair` generates a 12-word

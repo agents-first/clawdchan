@@ -37,6 +37,12 @@ type Store interface {
 	EnqueueOutbox(ctx context.Context, peer identity.NodeID, env envelope.Envelope) error
 	DrainOutbox(ctx context.Context, peer identity.NodeID) ([]envelope.Envelope, error)
 
+	// PurgeConversations wipes threads, envelopes, and outbox. Identity and
+	// peers (pairings) are preserved. Called by hosts that want
+	// session-scoped thread state — e.g. clawdchan-mcp at boot, so a fresh
+	// Claude Code session starts with an empty thread list.
+	PurgeConversations(ctx context.Context) error
+
 	Close() error
 }
 
@@ -326,6 +332,24 @@ func (s *sqliteStore) DrainOutbox(ctx context.Context, peer identity.NodeID) ([]
 		return nil, err
 	}
 	return envs, nil
+}
+
+func (s *sqliteStore) PurgeConversations(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`DELETE FROM envelopes`,
+		`DELETE FROM threads`,
+		`DELETE FROM outbox`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("purge: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // scanPeer works with *sql.Row and *sql.Rows since both have a Scan(dest...) method.

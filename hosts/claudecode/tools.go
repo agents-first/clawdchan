@@ -265,7 +265,10 @@ func peersHandler(n *node.Node) server.ToolHandlerFunc {
 
 func threadsTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_threads",
-		mcp.WithDescription("List all conversation threads this node is part of. thread_id is a full 32-hex string; pass it as-is to poll/send/wait."),
+		mcp.WithDescription("List conversation threads for the CURRENT Claude Code session. "+
+			"Threads are ephemeral per MCP session: ones opened before this session started are not discoverable here — "+
+			"start a fresh thread with clawdchan_open_thread. Pairings persist; threads don't. "+
+			"thread_id is a full 32-hex string; pass it as-is to poll/send/wait."),
 	)
 }
 
@@ -284,7 +287,10 @@ func threadsHandler(n *node.Node) server.ToolHandlerFunc {
 				"created_ms": t.CreatedMs,
 			})
 		}
-		return jsonResult(map[string]any{"threads": out}), nil
+		return jsonResult(map[string]any{
+			"threads": out,
+			"note":    "Threads are ephemeral per Claude Code session — this list is always scoped to this MCP process. Pairings persist; threads don't. Open a new thread with clawdchan_open_thread when you want to talk.",
+		}), nil
 	}
 }
 

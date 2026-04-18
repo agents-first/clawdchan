@@ -156,3 +156,89 @@ func TestOutbox(t *testing.T) {
 		t.Fatalf("expected empty after drain, got %d", len(empty))
 	}
 }
+
+// TestPurgeConversations verifies the MCP ephemeral-boot contract: threads,
+// envelopes, and outbox are wiped; identity and peers (pairings) survive.
+func TestPurgeConversations(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+
+	id, _ := identity.Generate()
+	if err := s.SaveIdentity(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	peerID, _ := identity.Generate()
+	peer := pairing.Peer{
+		NodeID:     peerID.SigningPublic,
+		KexPub:     peerID.KexPublic,
+		Alias:      "bruce",
+		Trust:      pairing.TrustPaired,
+		PairedAtMs: time.Now().UnixMilli(),
+	}
+	if err := s.UpsertPeer(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+
+	thread := Thread{
+		ID:        envelope.ULID{7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7},
+		PeerID:    peer.NodeID,
+		Topic:     "ephemeral",
+		CreatedMs: time.Now().UnixMilli(),
+	}
+	if err := s.CreateThread(ctx, thread); err != nil {
+		t.Fatal(err)
+	}
+	env := envelope.Envelope{
+		Version:     envelope.Version,
+		EnvelopeID:  envelope.ULID{3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+		ThreadID:    thread.ID,
+		From:        envelope.Principal{NodeID: id.SigningPublic, Role: envelope.RoleAgent},
+		Intent:      envelope.IntentSay,
+		CreatedAtMs: time.Now().UnixMilli(),
+		Content:     envelope.Content{Kind: envelope.ContentText, Text: "x"},
+	}
+	if err := envelope.Sign(&env, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendEnvelope(ctx, env, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnqueueOutbox(ctx, peer.NodeID, env); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.PurgeConversations(ctx); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+
+	// Threads gone.
+	ts, err := s.ListThreads(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 0 {
+		t.Fatalf("expected 0 threads after purge, got %d", len(ts))
+	}
+	// Envelopes gone.
+	es, _ := s.ListEnvelopes(ctx, thread.ID, 0)
+	if len(es) != 0 {
+		t.Fatalf("expected 0 envelopes after purge, got %d", len(es))
+	}
+	// Outbox gone.
+	drained, _ := s.DrainOutbox(ctx, peer.NodeID)
+	if len(drained) != 0 {
+		t.Fatalf("expected 0 outbox entries after purge, got %d", len(drained))
+	}
+	// Identity survives.
+	if _, err := s.LoadIdentity(ctx); err != nil {
+		t.Fatalf("identity lost on purge: %v", err)
+	}
+	// Peer survives.
+	got, err := s.GetPeer(ctx, peer.NodeID)
+	if err != nil {
+		t.Fatalf("peer lost on purge: %v", err)
+	}
+	if got.Alias != "bruce" {
+		t.Fatalf("peer alias mangled: %q", got.Alias)
+	}
+}
