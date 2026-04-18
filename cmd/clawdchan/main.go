@@ -90,6 +90,8 @@ func main() {
 		err = cmdListen(args)
 	case "daemon":
 		err = cmdDaemon(args)
+	case "path-setup":
+		err = cmdPathSetup(args)
 	case "inspect":
 		err = cmdInspect(args)
 	case "doctor":
@@ -123,10 +125,11 @@ Commands:
   threads   List conversation threads
   open      Open a new thread with a peer
   send      Send a message on a thread
-  listen    Stay connected and tail traffic to stdout (terminal UX)
-  daemon    Background listener: fires OS notifications on inbound
-            Subcommands: run | install | uninstall | status
-  inspect   Print envelopes on a thread
+  listen      Stay connected and tail traffic to stdout (terminal UX)
+  daemon      Background listener: fires OS notifications on inbound
+              Subcommands: run | setup | install | uninstall | status
+  path-setup  Put $GOPATH/bin on your shell PATH (zsh/bash/fish)
+  inspect     Print envelopes on a thread
   doctor    Diagnose install, config, and relay connectivity
 
 Config lives at $CLAWDCHAN_HOME or ~/.clawdchan.
