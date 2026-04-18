@@ -13,9 +13,12 @@ replied, ask me about it" toasts — comes from a separate background daemon.
   must hardcode an absolute path in `.mcp.json` (see below).
 - A running node — initialize once with `clawdchan init -relay <url>
   -alias <name>`.
-- For ambient, always-on delivery, run `clawdchan daemon` in a terminal
-  (or as a launchd/systemd user service). The daemon owns the relay link,
-  ingests inbound envelopes, and fires OS notifications.
+- For ambient, always-on delivery, run `clawdchan daemon install` once.
+  It registers the daemon as a LaunchAgent (macOS), user systemd unit
+  (Linux), or Scheduled Task (Windows), starts it, and auto-starts it at
+  every login. Subcommands: `run`, `install`, `uninstall`, `status`. The
+  daemon owns the relay link, ingests inbound envelopes, and fires native
+  OS notifications with title + body text (and a sound on macOS/Windows).
 
 ## Configuration
 

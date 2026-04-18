@@ -50,18 +50,23 @@ doctor` validates binary, config, identity, and relay in one shot.
 
 ## Phase 1.5 — Always-on daemon (shipped as v0.2)
 
-Status: **partial.** Manual-launch daemon shipped; launchd/systemd install
+Status: **done** for the background-service part; UserPromptSubmit hook
 still pending.
 
-- `clawdchan daemon` subcommand holds the relay link, drains the outbox,
-  classifies inbound (new session vs. continuation), and fires OS
-  notifications (osascript on macOS, notify-send on Linux).
+- `clawdchan daemon run` holds the relay link, drains the outbox,
+  classifies inbound (new session vs. continuation), and fires native OS
+  notifications — osascript on darwin (with `sound name "default"`),
+  notify-send on linux, PowerShell balloon tips via `System.Windows.Forms`
+  on windows. Debounced per peer within 30s.
+- `clawdchan daemon install` / `uninstall` / `status` register the daemon
+  as a LaunchAgent (`~/Library/LaunchAgents/com.vmaroon.clawdchan.daemon.plist`,
+  darwin), a user systemd unit (`~/.config/systemd/user/clawdchan-daemon.service`,
+  linux), or a Scheduled Task (`ClawdChan Daemon`, windows with
+  `ONLOGON`/`LIMITED`). No terminal window required.
 - The MCP server checks the listener registry at startup and skips its own
   relay connect when a daemon is present — writes outbound to the shared
   SQLite outbox for the daemon to drain (up to 10s tick). Falls back to
   owning the relay link when no daemon is present.
-- Still TODO: `clawdchan daemon install` to drop a launchd plist / systemd
-  user unit so the daemon is truly always-on without manual terminal use.
 - Still TODO: UserPromptSubmit hook that reads the store and injects an
   inbox digest into Claude's context on each turn, so the agent sees new
   traffic without needing to call `clawdchan_inbox` explicitly.

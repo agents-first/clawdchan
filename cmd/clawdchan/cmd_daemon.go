@@ -21,17 +21,43 @@ import (
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
-// cmdDaemon runs a persistent ClawdChan listener that holds the relay link,
-// ingests inbound envelopes into the local store, and fires an OS notification
-// when something meaningful lands. The notification copy tells the user to
-// "ask Claude about it" — we rely on that prompt plus the UserPromptSubmit
-// hook digest to resurface context when the user next engages the agent.
+// cmdDaemon dispatches the daemon subcommand.
 //
-// This supersedes `clawdchan listen -follow`: listen is for tailing traffic
-// in a terminal; daemon is for ambient, toast-driven awareness.
+//	clawdchan daemon              # foreground run (alias for `run`)
+//	clawdchan daemon run          # foreground run
+//	clawdchan daemon install      # install as a LaunchAgent (darwin) / user systemd unit (linux) and start
+//	clawdchan daemon uninstall    # stop and remove
+//	clawdchan daemon status       # report install + running state
+//
+// The daemon itself holds the relay link, ingests inbound envelopes into the
+// local SQLite store, and fires an OS notification per peer (debounced) when
+// something lands. Notification copy is a prompt to the user — "Alice's agent
+// replied, ask me to continue" — that teaches the async UX.
 func cmdDaemon(args []string) error {
-	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
-	quiet := fs.Bool("quiet", false, "suppress OS notifications (stderr logging only)")
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return daemonRun(args)
+	}
+	sub := args[0]
+	rest := args[1:]
+	switch sub {
+	case "run":
+		return daemonRun(rest)
+	case "install":
+		return daemonInstall(rest)
+	case "uninstall", "remove":
+		return daemonUninstall(rest)
+	case "status":
+		return daemonStatus(rest)
+	default:
+		return fmt.Errorf("unknown daemon subcommand %q (use run|install|uninstall|status)", sub)
+	}
+}
+
+// --- run --------------------------------------------------------------------
+
+func daemonRun(args []string) error {
+	fs := flag.NewFlagSet("daemon run", flag.ExitOnError)
+	verbose := fs.Bool("v", false, "log every inbound to stderr (default: silent — only OS notifications)")
 	fs.Parse(args)
 
 	c, err := loadConfig()
@@ -39,7 +65,7 @@ func cmdDaemon(args []string) error {
 		return err
 	}
 
-	d := &daemonSurface{quiet: *quiet}
+	d := &daemonSurface{verbose: *verbose}
 	n, err := node.New(node.Config{
 		DataDir:  c.DataDir,
 		RelayURL: c.RelayURL,
@@ -70,15 +96,8 @@ func cmdDaemon(args []string) error {
 	}
 	defer unreg()
 
-	fmt.Printf("clawdchan daemon running\n")
-	fmt.Printf("  node:  %s\n", hex.EncodeToString(nid[:]))
-	fmt.Printf("  relay: %s\n", c.RelayURL)
-	if *quiet {
-		fmt.Println("  notifications: off (stderr only)")
-	} else {
-		fmt.Println("  notifications: on")
-	}
-	fmt.Println("holding relay link. Ctrl-C to stop.")
+	fmt.Printf("clawdchan daemon running (node=%s relay=%s)\n",
+		hex.EncodeToString(nid[:])[:16], c.RelayURL)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -86,12 +105,12 @@ func cmdDaemon(args []string) error {
 	return nil
 }
 
-// daemonSurface receives inbound envelopes (via Notify/Ask) and fires
-// OS notifications. Debounces per peer within debounceWindow so a rapid
-// burst from one peer yields one toast, not ten.
+// daemonSurface receives inbound envelopes and fires OS notifications.
+// Debounces per peer within debounceWindow so a rapid burst from one peer
+// yields one toast, not ten.
 type daemonSurface struct {
-	quiet bool
-	node  *node.Node
+	verbose bool
+	node    *node.Node
 
 	mu   sync.Mutex
 	last map[identity.NodeID]time.Time
@@ -133,7 +152,9 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	now := time.Now()
 	if t, ok := d.last[env.From.NodeID]; ok && now.Sub(t) < debounceWindow {
 		d.mu.Unlock()
-		fmt.Fprintf(os.Stderr, "[debounced] from=%s intent=%s\n", env.From.Alias, intentName(env.Intent))
+		if d.verbose {
+			fmt.Fprintf(os.Stderr, "[debounced] from=%s intent=%s\n", env.From.Alias, intentName(env.Intent))
+		}
 		return
 	}
 	d.last[env.From.NodeID] = now
@@ -150,11 +171,11 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	}
 
 	title, body := notificationCopy(alias, env.Intent, env.Content, d.isNewSession(tid))
-	fmt.Fprintf(os.Stderr, "[notify] %s — %s\n", title, body)
-	if !d.quiet {
-		if err := notify.Dispatch(title, body); err != nil {
-			fmt.Fprintf(os.Stderr, "[notify] dispatch error: %v\n", err)
-		}
+	if err := notify.Dispatch(title, body); err != nil {
+		fmt.Fprintf(os.Stderr, "notify: %v\n", err)
+	}
+	if d.verbose {
+		fmt.Fprintf(os.Stderr, "[notify] %s — %s\n", title, body)
 	}
 }
 
@@ -176,8 +197,7 @@ func (d *daemonSurface) isNewSession(tid envelope.ThreadID) bool {
 
 // notificationCopy produces the toast title and body. The body always ends
 // with a call-to-action ("ask me about it") so the user learns the UX: they
-// can't be interrupted mid-session by the agent, but they know how to
-// resume — just talk to Claude.
+// can't be interrupted mid-session by the agent, but they know how to resume.
 func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, newSession bool) (title, body string) {
 	title = "ClawdChan"
 	switch intent {

@@ -11,7 +11,7 @@
 //	clawdchan open      <peer-hex> [-topic T]          open a new thread
 //	clawdchan send      <thread-hex-or-prefix> <text>
 //	clawdchan listen    [-follow] [-tail N]            run node; print inbound
-//	clawdchan daemon    [-quiet]                       run node; OS notifications on inbound
+//	clawdchan daemon    run|install|uninstall|status   background listener with OS notifications
 //	clawdchan inspect   <thread-hex-or-prefix>         print envelopes on thread
 //	clawdchan doctor                                   diagnose install and link
 //
@@ -124,7 +124,8 @@ Commands:
   open      Open a new thread with a peer
   send      Send a message on a thread
   listen    Stay connected and tail traffic to stdout (terminal UX)
-  daemon    Stay connected and fire OS notifications on inbound (ambient UX)
+  daemon    Background listener: fires OS notifications on inbound
+            Subcommands: run | install | uninstall | status
   inspect   Print envelopes on a thread
   doctor    Diagnose install, config, and relay connectivity
 
