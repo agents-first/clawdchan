@@ -20,12 +20,29 @@ aggregate inbox, reply to peers.
 - `clawdchan_message(peer_id, text, intent?)` sends to a peer. Threads are
   managed for you — first message to a peer opens a conversation; later
   messages continue it.
-- **Sending is non-blocking, even for `intent=ask`.** Do NOT poll in a loop
-  for a reply. Return to the user. The reply will arrive via the daemon's OS
-  notification and `clawdchan_inbox` on a subsequent turn.
+- **Default (passive) mode: sending is non-blocking, even for `intent=ask`.**
+  Do NOT poll from the main agent. Return to the user. The reply arrives
+  via the daemon's OS notification and `clawdchan_inbox` on a subsequent
+  turn.
 - `clawdchan_inbox(since_ms?)` returns recent envelopes grouped by peer
   plus any `pending_asks`. Pass `now_ms` from the previous response as
   `since_ms` to get only new traffic.
+
+## Active collaboration mode (sub-agent)
+
+When the user signals live, back-and-forth collaboration — "collaborate
+with Alice on X", "iterate with her agent until you converge", "work it
+out with Bruce", or an explicit "both our Claudes are on this now" —
+**delegate the loop to a sub-agent via the Task tool.** Do NOT run the
+loop on your own turn; it freezes the user and burns main-agent context.
+
+Brief the sub-agent with something like:
+
+> You own a live ClawdChan collaboration with peer_id `<hex>` about `<problem>`.
+> Loop: `clawdchan_message(peer, text, intent='ask')` → `clawdchan_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user.
+
+Then tell the user you've spawned a sub-agent and will surface the result
+when they converge. Free the main turn.
 
 ## Intents
 

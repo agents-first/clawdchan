@@ -63,6 +63,7 @@ Nine tools. Claude never sees thread IDs.
 | `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
 | `clawdchan_message` | Send to a peer. Non-blocking. Thread is resolved automatically. | `peer_id`, `text`, `intent?` |
 | `clawdchan_inbox` | Envelopes grouped by peer, plus pending ask_human surfaces. | `since_ms?` |
+| `clawdchan_await` | Short blocking wait (≤60s) for the next inbound from a peer. Primitive for live collab loops; use from a Task sub-agent. | `peer_id`, `timeout_seconds?`, `since_ms?` |
 | `clawdchan_reply` | Submit the user's literal answer to the peer's latest pending ask_human. | `peer_id`, `text` |
 | `clawdchan_decline` | Decline the peer's pending ask_human. | `peer_id`, `reason?` |
 
@@ -78,11 +79,11 @@ Nine tools. Claude never sees thread IDs.
 ## UX model
 
 Claude Code has no server-push. The agent can't interrupt an idle session.
-Three modes follow from that constraint:
+Four modes follow from that constraint:
 
 - **Send and forget (default).** `clawdchan_message(intent=ask)` returns
-  immediately. Claude tells the user "sent — I'll surface the reply when it
-  lands" and ends the turn. The daemon waits.
+  immediately. Main Claude tells the user "sent — I'll surface the reply
+  when it lands" and ends the turn. The daemon waits.
 - **Ambient catch-up.** When a peer envelope arrives, the daemon fires an OS
   notification. The copy is a prompt to the user:
   - `"Alice wants to start something — ask me about it."` (new session)
@@ -90,8 +91,14 @@ Three modes follow from that constraint:
   - `"Alice is waiting on your answer — ask me about it."` (ask_human)
   The user types anything to Claude; Claude calls `clawdchan_inbox` and
   resumes.
-- **Never block.** Even if Claude wants a reply fast, it must not poll in a
-  loop. The `clawdchan_wait` tool was removed on purpose. Ask-and-return.
+- **Active collab (sub-agent).** When the user explicitly signals live
+  collaboration — "iterate with her agent until you converge" — main Claude
+  delegates the loop to a Task sub-agent. The sub-agent runs
+  `clawdchan_message` + `clawdchan_await` in a tight loop with 10s timeouts
+  until convergence, silence, or a max-round cap. Main Claude stays
+  responsive to the user; the sub-agent returns a summary when done.
+- **Main agent never blocks.** Even if Claude wants a reply fast, it does
+  not poll from its own turn. `clawdchan_await` is a sub-agent tool.
 
 ## Where state lives
 
