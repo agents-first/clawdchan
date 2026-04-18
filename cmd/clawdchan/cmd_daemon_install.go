@@ -284,7 +284,12 @@ func installWindowsTask(bin string, force bool) error {
 // toggled off by Focus Mode, and the user has no way to discover that —
 // the fire-and-pray approach returns exit 0 and never reports the drop.
 func verifyTestNotification() {
-	if err := notify.Dispatch("ClawdChan", "Daemon installed. You'll get notifications when peers message you."); err != nil {
+	m := notify.Message{
+		Title:    "ClawdChan",
+		Subtitle: "Daemon installed",
+		Body:     "You'll get notifications when peers message you.",
+	}
+	if err := notify.Dispatch(m); err != nil {
 		fmt.Printf("note: test notification returned %v (install otherwise ok)\n", err)
 		return
 	}

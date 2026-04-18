@@ -17,7 +17,12 @@ import (
 //
 // The 6s ShowBalloonTip + 7s Start-Sleep lets the toast render and sit in
 // the Action Center before the NotifyIcon object is disposed.
-func dispatch(title, body string) error {
+func dispatch(m Message) error {
+	// Balloon tips don't have a separate subtitle; fold into body.
+	body := m.Body
+	if m.Subtitle != "" {
+		body = m.Subtitle + "\n" + strings.TrimSpace(m.Body)
+	}
 	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -30,7 +35,7 @@ $ni.Visible = $true
 $ni.ShowBalloonTip(6000)
 Start-Sleep -Seconds 7
 $ni.Dispose()
-`, psQuote(title), psQuote(body))
+`, psQuote(m.Title), psQuote(body))
 
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-")
 	cmd.Stdin = strings.NewReader(script)

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -173,12 +174,13 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 		alias = hex.EncodeToString(env.From.NodeID[:4])
 	}
 
-	title, body := notificationCopy(alias, env.Intent, env.Content, d.isNewSession(tid))
-	if err := notify.Dispatch(title, body); err != nil {
+	msg := notificationCopy(alias, env.Intent, env.Content, d.isNewSession(tid))
+	msg.ActivateApp = preferredActivateBundle()
+	if err := notify.Dispatch(msg); err != nil {
 		fmt.Fprintf(os.Stderr, "notify: %v\n", err)
 	}
 	if d.verbose {
-		fmt.Fprintf(os.Stderr, "[notify] %s — %s\n", title, body)
+		fmt.Fprintf(os.Stderr, "[notify] %s | %s | %s\n", msg.Title, msg.Subtitle, msg.Body)
 	}
 }
 
@@ -198,32 +200,46 @@ func (d *daemonSurface) isNewSession(tid envelope.ThreadID) bool {
 	return true
 }
 
-// notificationCopy produces the toast title and body. The body always ends
-// with a call-to-action ("ask me about it") so the user learns the UX: they
-// can't be interrupted mid-session by the agent, but they know how to resume.
-func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, newSession bool) (title, body string) {
-	title = "ClawdChan"
+// notificationCopy produces a three-line toast: Title / Subtitle (who +
+// what) / Body (preview of what was said + a call-to-action). The CTA
+// always ends with "ask me …" so the user learns the UX: they can't be
+// interrupted mid-session by the agent, but they know how to resume.
+func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, newSession bool) notify.Message {
+	preview := introPreview(c)
+	msg := notify.Message{Title: "ClawdChan"}
+
 	switch intent {
 	case envelope.IntentAskHuman:
-		body = fmt.Sprintf("%s is waiting on your answer — ask me about it.", alias)
+		msg.Subtitle = fmt.Sprintf("%s is waiting on your answer", alias)
+		if preview != "" {
+			msg.Body = fmt.Sprintf("%q — ask me about it.", preview)
+		} else {
+			msg.Body = "Ask me about it."
+		}
 	case envelope.IntentNotifyHuman:
 		if newSession {
-			body = fmt.Sprintf("%s wants to tell you something — ask me about it.", alias)
+			msg.Subtitle = fmt.Sprintf("%s wants to tell you something", alias)
 		} else {
-			body = fmt.Sprintf("%s sent an update — ask me when ready.", alias)
+			msg.Subtitle = fmt.Sprintf("%s sent an update", alias)
+		}
+		if preview != "" {
+			msg.Body = fmt.Sprintf("%q — ask me when ready.", preview)
+		} else {
+			msg.Body = "Ask me when ready."
 		}
 	default:
 		if newSession {
-			if preview := introPreview(c); preview != "" {
-				body = fmt.Sprintf("%s's agent wants to start something: %q — ask me about it.", alias, preview)
-			} else {
-				body = fmt.Sprintf("%s's agent wants to start something — ask me about it.", alias)
-			}
+			msg.Subtitle = fmt.Sprintf("%s's agent wants to start something", alias)
 		} else {
-			body = fmt.Sprintf("%s's agent replied — ask me to continue.", alias)
+			msg.Subtitle = fmt.Sprintf("%s's agent replied", alias)
+		}
+		if preview != "" {
+			msg.Body = fmt.Sprintf("%q — ask me to continue.", preview)
+		} else {
+			msg.Body = "Ask me to continue."
 		}
 	}
-	return
+	return msg
 }
 
 func introPreview(c envelope.Content) string {
@@ -245,4 +261,27 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// preferredActivateBundle picks a macOS bundle id for terminal-notifier to
+// focus when the user clicks the toast. We sniff which terminal-like app is
+// actually running and return its bundle; fall back to Terminal.app. This
+// makes "click the notification → switch back to your Claude Code window"
+// work for the common terminals without requiring user config.
+func preferredActivateBundle() string {
+	candidates := []struct{ proc, bundle string }{
+		{"ghostty", "com.mitchellh.ghostty"},
+		{"iTerm2", "com.googlecode.iterm2"},
+		{"iTerm", "com.googlecode.iterm2"},
+		{"WarpTerminal", "dev.warp.Warp-Stable"},
+		{"kitty", "net.kovidgoyal.kitty"},
+		{"Alacritty", "org.alacritty"},
+		{"Terminal", "com.apple.Terminal"},
+	}
+	for _, c := range candidates {
+		if err := exec.Command("pgrep", "-xq", c.proc).Run(); err == nil {
+			return c.bundle
+		}
+	}
+	return "com.apple.Terminal"
 }

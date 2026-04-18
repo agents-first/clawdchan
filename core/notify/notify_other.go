@@ -2,4 +2,4 @@
 
 package notify
 
-func dispatch(title, body string) error { return nil }
+func dispatch(m Message) error { return nil }
