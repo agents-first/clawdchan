@@ -373,11 +373,19 @@ func (n *Node) sessionFor(peer pairing.Peer) (*session.Session, error) {
 
 func (n *Node) inboundLoop() {
 	for {
+		select {
+		case <-n.stopCh:
+			return
+		default:
+		}
 		n.mu.Lock()
 		link := n.link
 		n.mu.Unlock()
 		if link == nil {
-			return
+			if !n.attemptReconnect() {
+				return
+			}
+			continue
 		}
 		frame, err := link.Recv(context.Background())
 		if err != nil {
@@ -386,9 +394,51 @@ func (n *Node) inboundLoop() {
 				return
 			default:
 			}
-			return
+			// Link dropped. Clear it and let the next iteration reconnect.
+			n.mu.Lock()
+			if n.link == link {
+				n.link = nil
+			}
+			n.mu.Unlock()
+			link.Close()
+			continue
 		}
 		n.handleInbound(frame)
+	}
+}
+
+// attemptReconnect redials the relay with exponential backoff. Returns true
+// once a new link is established, false if Stop was called while retrying.
+// This is what keeps a long-running daemon alive through transient network
+// drops, laptop sleep/wake, relay restarts, etc. — without it, the very
+// first websocket failure silently bricks the node.
+func (n *Node) attemptReconnect() bool {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+	for {
+		select {
+		case <-n.stopCh:
+			return false
+		default:
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		link, err := n.transport.Connect(ctx, n.identity)
+		cancel()
+		if err == nil {
+			n.mu.Lock()
+			n.link = link
+			n.mu.Unlock()
+			return true
+		}
+		select {
+		case <-n.stopCh:
+			return false
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
 }
 
