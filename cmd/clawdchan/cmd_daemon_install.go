@@ -197,14 +197,7 @@ func installLaunchd(bin string, force bool) error {
 	fmt.Printf("daemon started, logs at %s\n", logPath)
 	fmt.Println("daemon will auto-start at each login.")
 
-	// Fire a test notification to (a) confirm the binary works and (b)
-	// trigger the macOS permission prompt on the very first install, while
-	// the user is watching, rather than silently on some future envelope.
-	if err := notify.Dispatch("ClawdChan", "Daemon installed. You'll get notifications when peers message you."); err != nil {
-		fmt.Printf("note: test notification returned %v (install otherwise ok)\n", err)
-	} else {
-		fmt.Println("sent a test notification — if you don't see it, macOS may be asking you to allow notifications from 'Script Editor' (osascript). Click Allow.")
-	}
+	verifyTestNotification()
 	return nil
 }
 
@@ -239,9 +232,7 @@ func installSystemd(bin string, force bool) error {
 	fmt.Println("daemon started and enabled for auto-start at login.")
 	fmt.Printf("logs: journalctl --user -u %s -f\n", systemdUnit)
 
-	if err := notify.Dispatch("ClawdChan", "Daemon installed. You'll get notifications when peers message you."); err != nil {
-		fmt.Printf("note: test notification returned %v\n", err)
-	}
+	verifyTestNotification()
 	return nil
 }
 
@@ -279,10 +270,68 @@ func installWindowsTask(bin string, force bool) error {
 	}
 	fmt.Println("daemon started. It will auto-start at each logon.")
 
-	if err := notify.Dispatch("ClawdChan", "Daemon installed. You'll get notifications when peers message you."); err != nil {
-		fmt.Printf("note: test notification returned %v\n", err)
-	}
+	verifyTestNotification()
 	return nil
+}
+
+// --- test notification + guided fix ---------------------------------------
+
+// verifyTestNotification fires a test toast and, when stdin is a TTY, asks
+// the user whether they saw it. If not, we open the platform's notification
+// settings so the user can flip the allow-toggle on without digging through
+// menus. This is the most common failure mode: the bundle is registered
+// but the per-app "Allow Notifications" switch defaults to off or gets
+// toggled off by Focus Mode, and the user has no way to discover that —
+// the fire-and-pray approach returns exit 0 and never reports the drop.
+func verifyTestNotification() {
+	if err := notify.Dispatch("ClawdChan", "Daemon installed. You'll get notifications when peers message you."); err != nil {
+		fmt.Printf("note: test notification returned %v (install otherwise ok)\n", err)
+		return
+	}
+
+	if !stdinIsTTY() {
+		fmt.Println("sent a test notification. (non-interactive — not asking; if you don't see it, check your notification settings.)")
+		return
+	}
+
+	ok, err := promptYN("Did you see a test notification? [Y/n]: ", true)
+	if err != nil {
+		return
+	}
+	if ok {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("macOS / your OS is suppressing the notification despite the delivery API reporting success.")
+	fmt.Println("Most common causes:")
+	fmt.Println("  - Focus Mode / Do Not Disturb is on.")
+	fmt.Println("  - The per-app 'Allow Notifications' switch is off for the notifier backend.")
+	switch runtime.GOOS {
+	case "darwin":
+		fmt.Println()
+		if _, err := exec.LookPath("terminal-notifier"); err == nil {
+			fmt.Println("Look for 'terminal-notifier' in the list and turn 'Allow Notifications' on.")
+		} else {
+			fmt.Println("Consider `brew install terminal-notifier` — osascript's notifications are attributed to")
+			fmt.Println("'Script Editor', which is missing or unregistered on many Macs. terminal-notifier ships its")
+			fmt.Println("own registered bundle and is the reliable path.")
+		}
+		fmt.Println()
+		fmt.Println("Opening System Settings → Notifications for you…")
+		_ = exec.Command("open", "x-apple.systempreferences:com.apple.Notifications-Settings.extension").Run()
+	case "linux":
+		fmt.Println()
+		fmt.Println("Check your notification daemon (e.g. dunst, mako, or the desktop-environment-provided one) is running.")
+		fmt.Println("`notify-send 'test' 'test'` from your shell should produce a toast; if it doesn't, the notification daemon is the problem.")
+	case "windows":
+		fmt.Println()
+		fmt.Println("Open Settings → System → Notifications. Ensure 'Get notifications from apps and other senders' is on.")
+		fmt.Println("Also check Focus Assist isn't suppressing them.")
+		_ = exec.Command("explorer", "ms-settings:notifications").Run()
+	}
+	fmt.Println()
+	fmt.Println("Once allowed, rerun `clawdchan daemon install -force` to fire another test and confirm.")
 }
 
 // --- uninstall -------------------------------------------------------------
