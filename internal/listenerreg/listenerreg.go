@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -122,6 +123,11 @@ func pidAlive(pid int) bool {
 	p, err := os.FindProcess(pid)
 	if err != nil {
 		return false
+	}
+	if runtime.GOOS == "windows" {
+		// On Windows, FindProcess actually checks for existence and returns an
+		// error if the PID is not found. Signal(0) is not supported.
+		return true
 	}
 	err = p.Signal(syscall.Signal(0))
 	if err == nil {
