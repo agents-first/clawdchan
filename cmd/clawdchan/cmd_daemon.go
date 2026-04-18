@@ -200,44 +200,43 @@ func (d *daemonSurface) isNewSession(tid envelope.ThreadID) bool {
 	return true
 }
 
-// notificationCopy produces a three-line toast: Title / Subtitle (who +
-// what) / Body (preview of what was said + a call-to-action). The CTA
-// always ends with "ask me …" so the user learns the UX: they can't be
+// notificationCopy produces a three-line toast: Title / Subtitle / Body.
+// The preview of what the peer actually said goes in the SUBTITLE (not the
+// body), because macOS native banner rendering often clips the body line —
+// users see title + subtitle but have to hover or swipe to reveal the body.
+// Keeping the content preview in subtitle makes it visible at a glance.
+//
+// Body holds the short CTA so the user learns the UX: they can't be
 // interrupted mid-session by the agent, but they know how to resume.
 func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, newSession bool) notify.Message {
 	preview := introPreview(c)
 	msg := notify.Message{Title: "ClawdChan"}
 
+	var subject string
 	switch intent {
 	case envelope.IntentAskHuman:
-		msg.Subtitle = fmt.Sprintf("%s is waiting on your answer", alias)
-		if preview != "" {
-			msg.Body = fmt.Sprintf("%q — ask me about it.", preview)
-		} else {
-			msg.Body = "Ask me about it."
-		}
+		subject = fmt.Sprintf("%s asks", alias)
+		msg.Body = "Ask me about it in Claude Code."
 	case envelope.IntentNotifyHuman:
 		if newSession {
-			msg.Subtitle = fmt.Sprintf("%s wants to tell you something", alias)
+			subject = fmt.Sprintf("%s has something to tell you", alias)
 		} else {
-			msg.Subtitle = fmt.Sprintf("%s sent an update", alias)
+			subject = fmt.Sprintf("%s sent an update", alias)
 		}
-		if preview != "" {
-			msg.Body = fmt.Sprintf("%q — ask me when ready.", preview)
-		} else {
-			msg.Body = "Ask me when ready."
-		}
+		msg.Body = "Ask me about it in Claude Code."
 	default:
 		if newSession {
-			msg.Subtitle = fmt.Sprintf("%s's agent wants to start something", alias)
+			subject = fmt.Sprintf("%s's agent wants to start", alias)
 		} else {
-			msg.Subtitle = fmt.Sprintf("%s's agent replied", alias)
+			subject = fmt.Sprintf("%s's agent replied", alias)
 		}
-		if preview != "" {
-			msg.Body = fmt.Sprintf("%q — ask me to continue.", preview)
-		} else {
-			msg.Body = "Ask me to continue."
-		}
+		msg.Body = "Ask me to continue in Claude Code."
+	}
+
+	if preview != "" {
+		msg.Subtitle = subject + `: "` + preview + `"`
+	} else {
+		msg.Subtitle = subject
 	}
 	return msg
 }
