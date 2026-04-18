@@ -3,6 +3,13 @@
 BIN := ./bin
 CMDS := clawdchan clawdchan-relay clawdchan-mcp
 
+# Recipes use Unix shell syntax (mkdir -p, rm -rf, case, ||). Force bash on
+# Windows — GNU Make would otherwise default to cmd.exe and fail.
+ifeq ($(OS),Windows_NT)
+SHELL := bash.exe
+.SHELLFLAGS := -c
+endif
+
 all: build
 
 help:
@@ -31,21 +38,18 @@ tidy:
 install:
 	go install ./cmd/clawdchan ./cmd/clawdchan-relay ./cmd/clawdchan-mcp
 	@GOBIN="$$(go env GOBIN)"; if [ -z "$$GOBIN" ]; then GOBIN="$$(go env GOPATH)/bin"; fi; \
+	  GOBIN=$$(printf '%s' "$$GOBIN" | tr '\\\\' '/'); \
 	  echo "Installed binaries to $$GOBIN"; \
-	  case ":$$PATH:" in \
-	    *":$$GOBIN:"*) \
-	      echo "  $$GOBIN is on your PATH. ✓"; \
-	      echo "  Running: clawdchan doctor"; \
-	      "$$GOBIN/clawdchan" doctor || true; \
-	      ;; \
-	    *) \
-	      echo "  WARNING: $$GOBIN is not on your PATH."; \
-	      echo "  Claude Code launches clawdchan-mcp via its 'command' string; bare names must resolve on PATH."; \
-	      echo "  Add to your shell profile:"; \
-	      echo "    export PATH=\"$$GOBIN:\$$PATH\""; \
-	      echo "  Or wire an absolute path into .mcp.json: clawdchan init -write-mcp <dir>"; \
-	      ;; \
-	  esac
+	  if command -v clawdchan >/dev/null 2>&1; then \
+	    echo "  [ok] clawdchan resolves on PATH"; \
+	    echo "  Running: clawdchan doctor"; \
+	    clawdchan doctor || true; \
+	  else \
+	    echo "  [warn] clawdchan is not on your PATH."; \
+	    echo "  Claude Code launches clawdchan-mcp via its 'command' string; bare names must resolve on PATH."; \
+	    echo "  Add $$GOBIN to your PATH (e.g. export PATH=\"$$GOBIN:\$$PATH\" in your shell profile),"; \
+	    echo "  or wire an absolute path into .mcp.json: clawdchan init -write-mcp <dir>"; \
+	  fi
 
 run-relay:
 	go run ./cmd/clawdchan-relay -addr :8787
