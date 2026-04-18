@@ -121,6 +121,16 @@ func New(cfg Config) (*Node, error) {
 // Identity returns the node's signing public key.
 func (n *Node) Identity() identity.NodeID { return n.identity.SigningPublic }
 
+// DataDir returns the directory holding this node's config and store. Host
+// bindings use it to locate sibling resources such as the listener registry.
+func (n *Node) DataDir() string { return n.cfg.DataDir }
+
+// RelayURL returns the relay this node is configured against.
+func (n *Node) RelayURL() string { return n.cfg.RelayURL }
+
+// Alias returns the node's configured display alias.
+func (n *Node) Alias() string { return n.cfg.Alias }
+
 // Close releases node resources. After Close, the node is unusable.
 func (n *Node) Close() error {
 	n.Stop()

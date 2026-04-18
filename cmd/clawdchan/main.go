@@ -2,16 +2,17 @@
 //
 // Subcommands:
 //
-//	clawdchan init      [-data DIR] [-relay URL] [-alias NAME]
+//	clawdchan init      [-data DIR] [-relay URL] [-alias NAME] [-write-mcp DIR]
 //	clawdchan whoami
-//	clawdchan pair      [-alias NAME]            print code; wait for peer
-//	clawdchan consume   <mnemonic...>             consume a code
+//	clawdchan pair      [-alias NAME]                 print code; wait for peer
+//	clawdchan consume   <mnemonic...>                  consume a code
 //	clawdchan peers
 //	clawdchan threads
-//	clawdchan open      <peer-hex> [-topic T]     open a new thread
-//	clawdchan send      <thread-hex> <text>
-//	clawdchan listen    [-follow]                 run node; print inbound
-//	clawdchan inspect   <thread-hex>              print envelopes on thread
+//	clawdchan open      <peer-hex> [-topic T]          open a new thread
+//	clawdchan send      <thread-hex-or-prefix> <text>
+//	clawdchan listen    [-follow] [-tail N]            run node; print inbound
+//	clawdchan inspect   <thread-hex-or-prefix>         print envelopes on thread
+//	clawdchan doctor                                   diagnose install and link
 //
 // On first run, `clawdchan init` creates ~/.clawdchan/config.json and the
 // SQLite store. Most subcommands start a node against the configured relay;
@@ -26,7 +27,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -37,6 +40,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
 	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
 type config struct {
@@ -85,6 +89,8 @@ func main() {
 		err = cmdListen(args)
 	case "inspect":
 		err = cmdInspect(args)
+	case "doctor":
+		err = cmdDoctor(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -116,8 +122,13 @@ Commands:
   send      Send a message on a thread
   listen    Stay connected to receive traffic
   inspect   Print envelopes on a thread
+  doctor    Diagnose install, config, and relay connectivity
 
-Config lives at $CLAWDCHAN_HOME or ~/.clawdchan.`)
+Config lives at $CLAWDCHAN_HOME or ~/.clawdchan.
+
+Listen output legend:
+  [time] -> me/role  thread=...  intent: text   (sent by this node)
+  [time] <- peer/role thread=...  intent: text   (received from peer)`)
 }
 
 func loadConfig() (config, error) {
@@ -167,6 +178,7 @@ func cmdInit(args []string) error {
 	dataDir := fs.String("data", defaultDataDir(), "data directory (holds config and sqlite store)")
 	relay := fs.String("relay", "ws://localhost:8787", "relay URL (ws:// or wss://)")
 	alias := fs.String("alias", "", "display alias sent during pairing")
+	writeMCP := fs.String("write-mcp", "", "also write a .mcp.json at this directory wired to this install's absolute clawdchan-mcp path")
 	fs.Parse(args)
 
 	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
@@ -187,7 +199,76 @@ func cmdInit(args []string) error {
 	fmt.Printf("  alias:    %s\n", c.Alias)
 	nid := n.Identity()
 	fmt.Printf("  node id:  %s\n", hex.EncodeToString(nid[:]))
+
+	mcpBin, mcpErr := resolveMCPBinary()
+	if mcpErr != nil {
+		fmt.Printf("\nclawdchan-mcp not on PATH: %v\n", mcpErr)
+		fmt.Printf("Install the MCP server so Claude Code can launch it:\n")
+		fmt.Printf("  make install    # then ensure $(go env GOPATH)/bin is on your PATH\n")
+	} else {
+		fmt.Printf("  mcp binary: %s\n", mcpBin)
+	}
+
+	if *writeMCP != "" {
+		path, err := writeProjectMCP(*writeMCP, mcpBin)
+		if err != nil {
+			return fmt.Errorf("write .mcp.json: %w", err)
+		}
+		fmt.Printf("\nWrote %s\n", path)
+		fmt.Printf("You must exit and restart your Claude Code session for the new MCP server to load.\n")
+	} else {
+		fmt.Printf("\nNext: add an .mcp.json to your project root, or rerun with -write-mcp <dir>.\n")
+		fmt.Printf("After wiring MCP, exit and restart your Claude Code session.\n")
+	}
 	return nil
+}
+
+// resolveMCPBinary returns the absolute path to clawdchan-mcp, preferring PATH
+// and falling back to $(go env GOPATH)/bin. Returns an error if neither works.
+func resolveMCPBinary() (string, error) {
+	if p, err := exec.LookPath("clawdchan-mcp"); err == nil {
+		return p, nil
+	}
+	// Fallback: try $(go env GOPATH)/bin/clawdchan-mcp.
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			gopath = filepath.Join(home, "go")
+		}
+	}
+	if gopath != "" {
+		candidate := filepath.Join(gopath, "bin", "clawdchan-mcp")
+		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("clawdchan-mcp not found on PATH or in $(go env GOPATH)/bin; run `make install`")
+}
+
+func writeProjectMCP(dir, mcpBin string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, ".mcp.json")
+	bin := mcpBin
+	if bin == "" {
+		bin = "clawdchan-mcp"
+	}
+	payload := map[string]any{
+		"mcpServers": map[string]any{
+			"clawdchan": map[string]any{
+				"command": bin,
+			},
+		},
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // --- whoami -----------------------------------------------------------------
@@ -248,7 +329,8 @@ func cmdPair(args []string) error {
 		return res.Err
 	}
 	fmt.Printf("Paired with %q (%s)\n", res.Peer.Alias, hex.EncodeToString(res.Peer.NodeID[:]))
-	fmt.Printf("Verify the 4-word code out-of-band: %s\n", strings.Join(res.Peer.SAS[:], "-"))
+	fmt.Printf("SAS: %s\n", strings.Join(res.Peer.SAS[:], "-"))
+	fmt.Println("Confirm this SAS matches on both sides (voice, in person, a trusted channel) before sending anything sensitive.")
 	return nil
 }
 
@@ -278,7 +360,8 @@ func cmdConsume(args []string) error {
 		return err
 	}
 	fmt.Printf("Paired with %q (%s)\n", peer.Alias, hex.EncodeToString(peer.NodeID[:]))
-	fmt.Printf("Verify the 4-word code out-of-band: %s\n", strings.Join(peer.SAS[:], "-"))
+	fmt.Printf("SAS: %s\n", strings.Join(peer.SAS[:], "-"))
+	fmt.Println("Confirm this SAS matches on both sides (voice, in person, a trusted channel) before sending anything sensitive.")
 	return nil
 }
 
@@ -380,11 +463,7 @@ func cmdOpen(args []string) error {
 
 func cmdSend(args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: clawdchan send <thread-hex> <text...>")
-	}
-	threadID, err := parseThreadID(args[0])
-	if err != nil {
-		return err
+		return errors.New("usage: clawdchan send <thread-hex-or-prefix> <text...>")
 	}
 	text := strings.Join(args[1:], " ")
 
@@ -397,6 +476,11 @@ func cmdSend(args []string) error {
 		return err
 	}
 	defer n.Close()
+
+	threadID, err := resolveThread(context.Background(), n, args[0])
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -416,6 +500,7 @@ func cmdSend(args []string) error {
 func cmdListen(args []string) error {
 	fs := flag.NewFlagSet("listen", flag.ExitOnError)
 	follow := fs.Bool("follow", true, "follow all threads; print new envelopes to stdout")
+	tail := fs.Int("tail", -1, "replay only the last N envelopes per thread before live traffic. -1 = all history, 0 = no replay")
 	fs.Parse(args)
 
 	c, err := loadConfig()
@@ -435,10 +520,20 @@ func cmdListen(args []string) error {
 	}
 	defer n.Stop()
 	nid := n.Identity()
-	fmt.Printf("clawdchan listening (relay=%s, node=%s)\n", c.RelayURL, hex.EncodeToString(nid[:])[:16])
+	fmt.Printf("clawdchan listening (relay=%s, node=%s)\n", c.RelayURL, hex.EncodeToString(nid[:]))
+	fmt.Println("legend: '->' = sent by this node, '<-' = received. role is 'agent' or 'human'. thread is full 32-hex id.")
+
+	unregister, regErr := listenerreg.Register(
+		c.DataDir, listenerreg.KindCLI,
+		hex.EncodeToString(nid[:]), c.RelayURL, c.Alias,
+	)
+	if regErr != nil {
+		fmt.Fprintf(os.Stderr, "warn: could not register listener: %v\n", regErr)
+	}
+	defer unregister()
 
 	if *follow {
-		go followAll(ctx, n)
+		go followAll(ctx, n, *tail)
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -446,8 +541,37 @@ func cmdListen(args []string) error {
 	return nil
 }
 
-func followAll(ctx context.Context, n *node.Node) {
+func followAll(ctx context.Context, n *node.Node, tail int) {
 	seen := make(map[envelope.ULID]bool)
+
+	// Initial replay pass.
+	threads, err := n.ListThreads(ctx)
+	if err == nil {
+		for _, th := range threads {
+			envs, err := n.ListEnvelopes(ctx, th.ID, 0)
+			if err != nil {
+				continue
+			}
+			start := 0
+			if tail == 0 {
+				start = len(envs)
+			} else if tail > 0 && len(envs) > tail {
+				start = len(envs) - tail
+			}
+			for i := start; i < len(envs); i++ {
+				e := envs[i]
+				seen[e.EnvelopeID] = true
+				printEnvelope(e, n.Identity())
+			}
+			// Mark envelopes we skipped during tail trimming as seen so they
+			// don't re-appear in the live phase.
+			for i := 0; i < start; i++ {
+				seen[envs[i].EnvelopeID] = true
+			}
+		}
+	}
+	fmt.Println("--- live ---")
+
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
 	for {
@@ -480,11 +604,7 @@ func followAll(ctx context.Context, n *node.Node) {
 
 func cmdInspect(args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: clawdchan inspect <thread-hex>")
-	}
-	threadID, err := parseThreadID(args[0])
-	if err != nil {
-		return err
+		return errors.New("usage: clawdchan inspect <thread-hex-or-prefix>")
 	}
 	c, err := loadConfig()
 	if err != nil {
@@ -495,6 +615,10 @@ func cmdInspect(args []string) error {
 		return err
 	}
 	defer n.Close()
+	threadID, err := resolveThread(context.Background(), n, args[0])
+	if err != nil {
+		return err
+	}
 	envs, err := n.ListEnvelopes(context.Background(), threadID, 0)
 	if err != nil {
 		return err
@@ -503,6 +627,138 @@ func cmdInspect(args []string) error {
 		printEnvelope(env, n.Identity())
 	}
 	return nil
+}
+
+// resolveThread accepts either a full 32-hex thread id or a unique prefix
+// matching one of the node's existing threads.
+func resolveThread(ctx context.Context, n *node.Node, s string) (envelope.ThreadID, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if len(s) == 32 {
+		return parseThreadID(s)
+	}
+	if s == "" {
+		return envelope.ThreadID{}, errors.New("empty thread id")
+	}
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return envelope.ThreadID{}, err
+	}
+	var matches []envelope.ThreadID
+	for _, t := range threads {
+		h := hex.EncodeToString(t.ID[:])
+		if strings.HasPrefix(h, s) {
+			matches = append(matches, t.ID)
+		}
+	}
+	if len(matches) == 0 {
+		return envelope.ThreadID{}, fmt.Errorf("no thread matches prefix %q", s)
+	}
+	if len(matches) > 1 {
+		return envelope.ThreadID{}, fmt.Errorf("prefix %q is ambiguous (%d matches)", s, len(matches))
+	}
+	return matches[0], nil
+}
+
+// --- doctor -----------------------------------------------------------------
+
+func cmdDoctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	timeout := fs.Duration("timeout", 5*time.Second, "relay connect timeout")
+	fs.Parse(args)
+
+	fmt.Println("clawdchan doctor")
+
+	// 1. config
+	cfgPath := filepath.Join(defaultDataDir(), configFileName)
+	c, cfgErr := loadConfig()
+	if cfgErr != nil {
+		fmt.Printf("  [FAIL] config: %v\n", cfgErr)
+		fmt.Printf("         run: clawdchan init -relay <url> -alias <name>\n")
+		return cfgErr
+	}
+	fmt.Printf("  [ok]  config: %s\n", cfgPath)
+	fmt.Printf("         data dir: %s\n", c.DataDir)
+	fmt.Printf("         relay:    %s\n", c.RelayURL)
+	fmt.Printf("         alias:    %s\n", c.Alias)
+
+	// 2. relay URL shape
+	if err := checkRelayURL(c.RelayURL); err != nil {
+		fmt.Printf("  [WARN] relay url: %v\n", err)
+	}
+
+	// 3. clawdchan CLI on PATH
+	if p, err := exec.LookPath("clawdchan"); err == nil {
+		fmt.Printf("  [ok]  clawdchan on PATH: %s\n", p)
+	} else {
+		fmt.Printf("  [WARN] clawdchan not on PATH. You are running: %s\n", firstNonEmpty(os.Args[0], "?"))
+	}
+
+	// 4. clawdchan-mcp discoverable
+	mcpBin, mcpErr := resolveMCPBinary()
+	if mcpErr != nil {
+		fmt.Printf("  [FAIL] clawdchan-mcp: %v\n", mcpErr)
+		fmt.Printf("         Claude Code's .mcp.json needs this binary on PATH, or an absolute\n")
+		fmt.Printf("         path. Fix with `make install` then add $(go env GOPATH)/bin to PATH,\n")
+		fmt.Printf("         or rerun `clawdchan init -write-mcp <project-dir>` to hardcode the path.\n")
+	} else {
+		fmt.Printf("  [ok]  clawdchan-mcp: %s\n", mcpBin)
+	}
+
+	// 5. node / identity / store
+	n, err := openNode(context.Background(), c)
+	if err != nil {
+		fmt.Printf("  [FAIL] open node: %v\n", err)
+		return err
+	}
+	defer n.Close()
+	id := n.Identity()
+	fmt.Printf("  [ok]  identity loaded: node id %s\n", hex.EncodeToString(id[:]))
+
+	// 6. relay reachability
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	if err := n.Start(ctx); err != nil {
+		fmt.Printf("  [FAIL] relay connect: %v\n", err)
+		return err
+	}
+	defer n.Stop()
+	fmt.Printf("  [ok]  relay reachable\n")
+
+	// 7. peers / threads summary
+	peers, _ := n.ListPeers(context.Background())
+	threads, _ := n.ListThreads(context.Background())
+	fmt.Printf("  [ok]  peers: %d, threads: %d\n", len(peers), len(threads))
+
+	if mcpErr != nil {
+		return mcpErr
+	}
+	fmt.Println("all checks passed")
+	return nil
+}
+
+func checkRelayURL(raw string) error {
+	if raw == "" {
+		return errors.New("relay url is empty")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+	switch u.Scheme {
+	case "ws", "wss", "http", "https":
+		return nil
+	default:
+		return fmt.Errorf("unexpected scheme %q (want ws/wss/http/https)", u.Scheme)
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -544,13 +800,11 @@ func printEnvelope(env envelope.Envelope, me identity.NodeID) {
 	if env.From.Role == envelope.RoleHuman {
 		role = "human"
 	}
-	intent := intentName(env.Intent)
 	fmt.Printf("[%s] %s %s/%s  thread=%s  %s\n",
 		time.UnixMilli(env.CreatedAtMs).Format(time.RFC3339),
 		dir, env.From.Alias, role,
-		hex.EncodeToString(env.ThreadID[:])[:16],
+		hex.EncodeToString(env.ThreadID[:]),
 		renderContent(env.Intent, env.Content))
-	_ = intent
 }
 
 func renderContent(intent envelope.Intent, c envelope.Content) string {
