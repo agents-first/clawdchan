@@ -295,11 +295,13 @@ Three feasibility caveats worth being explicit about:
 1. **Claude Code is reactive.** A CC plugin cannot push a message into a
    running CC session out of band; it only runs when the user takes a turn.
    A remote peer's `AskHuman` surfaces on the local user's *next* CC turn
-   (via `clawdchan_pending_asks`). That is fine for in-session collaboration
-   but it is **not** a "wake me up" channel. Async-wakeup use cases route
-   through OpenClaw, whose gateway reaches WhatsApp/Signal/iMessage. Mode B
-   (the optional `clawdchand` daemon, Phase 1.5) closes part of this gap for
-   CC users without OpenClaw.
+   (via the `pending_asks` field of `clawdchan_inbox`). Ambient awareness
+   comes from `clawdchan daemon`, which holds the relay link and fires an
+   OS notification with copy that prompts the user back into the session
+   ("Alice's agent replied — ask me about it"). That is fine for in-session
+   collaboration but it is **not** a "wake me up" channel at OS boundaries.
+   Async-wakeup use cases that cross devices route through OpenClaw, whose
+   gateway reaches WhatsApp/Signal/iMessage.
 
 2. **No forward secrecy in v0.** The session key is a deterministic function
    of both nodes' long-term X25519 keys. Leaking a long-term key

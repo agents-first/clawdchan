@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,35 +16,36 @@ import (
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
-// RegisterTools registers the full ClawdChan MCP tool surface on s, bound to n.
+// RegisterTools registers the ClawdChan MCP surface on s, bound to n.
+//
+// The surface is deliberately peer-centric. Threads are an internal plumbing
+// detail the agent never sees: you message a peer, reply to a peer, read an
+// aggregate inbox. This keeps Claude's mental state small — "who am I talking
+// to" — and matches the UX the daemon enforces: toasts like "Alice's agent
+// replied — ask me about it" bring the user back to the Claude Code session,
+// where the agent resumes naturally from inbox state.
 func RegisterTools(s *server.MCPServer, n *node.Node) {
 	s.AddTool(toolkitTool(), toolkitHandler(n))
-	s.AddTool(sessionStatusTool(), sessionStatusHandler(n))
 	s.AddTool(whoamiTool(), whoamiHandler(n))
 	s.AddTool(peersTool(), peersHandler(n))
-	s.AddTool(threadsTool(), threadsHandler(n))
-	s.AddTool(openThreadTool(), openThreadHandler(n))
-	s.AddTool(sendTool(), sendHandler(n))
-	s.AddTool(pollTool(), pollHandler(n))
-	s.AddTool(waitTool(), waitHandler(n))
 	s.AddTool(pairTool(), pairHandler(n))
 	s.AddTool(consumeTool(), consumeHandler(n))
-	s.AddTool(pendingAsksTool(), pendingAsksHandler(n))
-	s.AddTool(submitHumanReplyTool(), submitHumanReplyHandler(n))
-	s.AddTool(declineHumanTool(), declineHumanHandler(n))
+	s.AddTool(messageTool(), messageHandler(n))
+	s.AddTool(inboxTool(), inboxHandler(n))
+	s.AddTool(replyTool(), replyHandler(n))
+	s.AddTool(declineTool(), declineHandler(n))
 }
 
 // --- toolkit ----------------------------------------------------------------
 
-// toolkitTool returns the bundled capability list for the clawdchan MCP surface.
-// Agents can call this once instead of discovering tools one at a time.
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
-		mcp.WithDescription("Return the full ClawdChan tool surface with descriptions, intents, roles, and a recommended workflow. "+
-			"Call once at session start to avoid a chain of schema-discovery round trips."),
+		mcp.WithDescription("Return the full ClawdChan tool surface with a recommended workflow. "+
+			"Call once at session start."),
 	)
 }
 
@@ -52,89 +54,55 @@ func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 		id := n.Identity()
 		setup := buildSetupStatus(n)
 		return jsonResult(map[string]any{
-			"version": "0.1",
+			"version": "0.2",
 			"self": map[string]any{
 				"node_id": hex.EncodeToString(id[:]),
 				"alias":   n.Alias(),
 				"relay":   n.RelayURL(),
 			},
 			"setup": setup,
-			"agent_instructions": []string{
-				"If the user has not been greeted yet in this session, greet them now and surface `setup.user_message` verbatim as part of your first user-facing message. Do not bury it below a bullet list.",
-				"If `setup.needs_persistent_listener` is true, ask the user whether they'd like to open a second terminal and run `clawdchan listen -follow` now. Don't proceed with other ClawdChan work until they confirm or decline.",
-				"Before any clawdchan_send/clawdchan_wait to a peer, you may call clawdchan_session_status to re-check listener state if a lot of time has passed.",
-			},
 			"tools": []map[string]any{
-				{"name": "clawdchan_session_status", "summary": "Listener presence for this data dir. Tells the user whether they have a persistent listener or only the in-session MCP one."},
-				{"name": "clawdchan_whoami", "summary": "This node's id."},
-				{"name": "clawdchan_peers", "summary": "Paired peers."},
-				{"name": "clawdchan_threads", "summary": "Conversation threads."},
-				{"name": "clawdchan_open_thread", "summary": "Open a thread with a peer (optionally send an intro context pack)."},
-				{"name": "clawdchan_send", "summary": "Send a message on a thread with an intent."},
-				{"name": "clawdchan_poll", "summary": "Envelopes newer than since_ms. Unanswered ask_human envelopes are redacted."},
-				{"name": "clawdchan_wait", "summary": "Long-poll: block until a new envelope arrives on a thread or timeout."},
-				{"name": "clawdchan_pair", "summary": "Generate a pairing mnemonic."},
-				{"name": "clawdchan_consume", "summary": "Consume a peer's pairing mnemonic."},
-				{"name": "clawdchan_pending_asks", "summary": "List remote ask_human envelopes awaiting the human. Do NOT answer these yourself."},
-				{"name": "clawdchan_submit_human_reply", "summary": "Submit the user's reply to a pending ask_human."},
-				{"name": "clawdchan_decline_human", "summary": "Decline a pending ask_human on behalf of the user (closes it without a human answer)."},
+				{"name": "clawdchan_whoami", "summary": "This node's id and alias."},
+				{"name": "clawdchan_peers", "summary": "Paired peers, with pending-ask and last-activity info per peer."},
+				{"name": "clawdchan_pair", "summary": "Generate a pairing mnemonic and block until the peer consumes it."},
+				{"name": "clawdchan_consume", "summary": "Accept a peer's pairing mnemonic."},
+				{"name": "clawdchan_message", "summary": "Send a message to a peer. Threads are managed for you. Non-blocking."},
+				{"name": "clawdchan_inbox", "summary": "New envelopes grouped by peer, plus any pending ask_human surfaces for the user."},
+				{"name": "clawdchan_reply", "summary": "Submit the user's answer to the peer's pending ask_human."},
+				{"name": "clawdchan_decline", "summary": "Decline the peer's pending ask_human on behalf of the user."},
 			},
 			"intents": []map[string]string{
-				{"name": "say", "desc": "Default message to the peer's agent."},
-				{"name": "ask", "desc": "Peer's agent is expected to reply."},
-				{"name": "notify_human", "desc": "FYI for the peer's human. No reply expected."},
-				{"name": "ask_human", "desc": "Request the peer's human's explicit input. The peer agent must NOT answer; use submit_human_reply or decline_human."},
-				{"name": "handoff", "desc": "Yield the turn; next envelope must be role=human."},
-				{"name": "ack", "desc": "Delivery/read acknowledgement."},
-				{"name": "close", "desc": "End the thread."},
+				{"name": "say", "desc": "Default agent→agent message."},
+				{"name": "ask", "desc": "Agent→agent; peer is expected to reply."},
+				{"name": "notify_human", "desc": "FYI for the peer's human; no reply expected."},
+				{"name": "ask_human", "desc": "The peer's human must answer. Their agent is forbidden from replying."},
 			},
-			"roles": []map[string]string{
-				{"name": "agent", "desc": "Composed by the agent (you). Includes CLI sends from the user's shell in v0.1."},
-				{"name": "human", "desc": "Composed by the human via submit_human_reply."},
-			},
-			"workflow": []string{
-				"First turn: clawdchan_toolkit, then clawdchan_peers to see who you can talk to.",
-				"Greet a peer: clawdchan_open_thread with a context pack; the peer sees it as the first envelope.",
-				"Talk: clawdchan_send with intent=ask, then clawdchan_wait for the reply.",
-				"Each user turn: clawdchan_pending_asks. If any, present to the user and submit_human_reply or decline_human.",
+			"model": []string{
+				"Threads are internal. You talk to peers. The first clawdchan_message to a peer implicitly opens a conversation; later messages continue it.",
+				"Inbound surfaces two ways: (1) the daemon fires an OS notification like 'Alice replied — ask me about it', which brings the user back to this session; (2) call clawdchan_inbox to fetch aggregated traffic when you have reason to check.",
+				"clawdchan_message is non-blocking, even for intent=ask. Never poll in a loop for a reply — return to the user, and surface the reply on the next turn via clawdchan_inbox.",
+				"ask_human envelopes from a peer are for the human, not you. pending_asks in the inbox contains them verbatim; present them to the user and call clawdchan_reply with the user's actual words (or clawdchan_decline).",
 			},
 			"notes": []string{
-				"Mnemonics are 12 BIP-39 words. Treat them like a one-time pairing code, NOT a crypto wallet seed.",
-				"SAS is a 4-word fingerprint. Confirm it matches on both sides over a trusted channel before sending sensitive material.",
-				"clawdchan_send returns ok after the relay acks, not after the peer reads. Until the daemon ships, peers that are not running `clawdchan listen` or an open CC session will only see messages when they next connect.",
+				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds.",
+				"SAS is a 4-word fingerprint. Confirm it matches on both sides over a trusted channel before sharing sensitive material.",
 			},
 		}), nil
 	}
 }
 
-// --- session_status --------------------------------------------------------
-
-func sessionStatusTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_session_status",
-		mcp.WithDescription("Report which listeners are currently attached to this node's data dir. "+
-			"A 'listener' is any process holding a live relay link: the in-session MCP server, or a persistent "+
-			"`clawdchan listen` in a separate terminal. If no CLI listener is running, inbound messages stop "+
-			"the moment this Claude Code session closes; surface the returned user_message to the user and offer "+
-			"to walk them through starting one."),
-	)
-}
-
-func sessionStatusHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return jsonResult(buildSetupStatus(n)), nil
-	}
-}
+// --- setup / listener nudge -------------------------------------------------
 
 // buildSetupStatus inspects the listener registry and returns a structured
-// status blob plus a ready-to-speak user_message. Safe to call on every
-// toolkit/sessionStatus invocation; it also prunes stale pidfiles.
+// blob plus a ready-to-speak user_message. The daemon is the recommended
+// listener; the MCP server is a fallback that dies with the CC session.
 func buildSetupStatus(n *node.Node) map[string]any {
 	entries, err := listenerreg.List(n.DataDir())
 	if err != nil {
 		return map[string]any{
 			"error":                      err.Error(),
 			"needs_persistent_listener":  true,
-			"user_message":               "I couldn't read the listener registry. A persistent listener (`clawdchan listen -follow` in a separate terminal) will make sure inbound messages keep arriving after this session ends — want me to walk you through it?",
+			"user_message":               "Couldn't read the listener registry. A persistent daemon (`clawdchan daemon`) will make sure inbound messages keep arriving and trigger OS notifications — want me to walk you through it?",
 			"mcp_self_is_listener":       true,
 			"persistent_listener_active": false,
 		}
@@ -144,12 +112,10 @@ func buildSetupStatus(n *node.Node) map[string]any {
 	me := hex.EncodeToString(nid[:])
 	myPID := osGetpid()
 
-	listeners := make([]map[string]any, 0, len(entries))
 	var hasCLI, hasOtherMCP bool
+	listeners := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
 		if !strings.EqualFold(e.NodeID, me) {
-			// Registry is per data dir; entries should all match, but skip
-			// strangers defensively.
 			continue
 		}
 		isSelf := e.PID == myPID
@@ -175,12 +141,12 @@ func buildSetupStatus(n *node.Node) map[string]any {
 	var userMsg string
 	switch {
 	case hasCLI:
-		userMsg = "You already have a persistent `clawdchan listen` running — you'll keep receiving messages even after this Claude Code session closes. Nothing to set up."
+		userMsg = "You have a persistent `clawdchan daemon` running — OS notifications will fire on inbound, and the relay link survives this Claude Code session. Nothing to set up."
 	case hasOtherMCP:
-		userMsg = "Another Claude Code session on this machine is acting as your listener. While it's open you'll receive messages; for full independence you can run `clawdchan listen -follow` in a separate terminal."
+		userMsg = "Another Claude Code session on this machine is acting as your listener. For ambient, always-on delivery with OS notifications, open a terminal and run `clawdchan daemon`."
 	default:
 		userMsg = "Heads-up: right now I'm your only listener (via this MCP server). Messages will stop arriving the moment this Claude Code session closes. " +
-			"For a persistent inbox, open a second terminal and run:\n\n    clawdchan listen -follow\n\n" +
+			"For a persistent inbox with OS notifications, open a terminal and run:\n\n    clawdchan daemon\n\n" +
 			"Want me to wait while you start that, or proceed without it?"
 	}
 
@@ -189,18 +155,13 @@ func buildSetupStatus(n *node.Node) map[string]any {
 		"persistent_listener_active": hasCLI,
 		"needs_persistent_listener":  needs,
 		"listeners":                  listeners,
-		"listener_command":           "clawdchan listen -follow",
+		"listener_command":           "clawdchan daemon",
 		"user_message":               userMsg,
 	}
 }
 
-// osGetpid is split out so tests can stub it if needed.
 var osGetpid = func() int { return os.Getpid() }
 
-// maybeAttachListenerWarning returns setup when no persistent listener is
-// attached, for inclusion alongside tool results that imply the user expects
-// ongoing delivery (pair, consume, send, open_thread). Nil when a CLI
-// listener is present — don't nag.
 func maybeAttachListenerWarning(n *node.Node) map[string]any {
 	setup := buildSetupStatus(n)
 	needs, _ := setup["needs_persistent_listener"].(bool)
@@ -211,7 +172,6 @@ func maybeAttachListenerWarning(n *node.Node) map[string]any {
 		"needs_persistent_listener": true,
 		"user_message":              setup["user_message"],
 		"listener_command":          setup["listener_command"],
-		"agent_instruction":         "Before continuing with more ClawdChan work, surface setup_warning.user_message to the user verbatim and ask whether they want to start `clawdchan listen -follow` in a second terminal. Do not silently swallow this.",
 	}
 }
 
@@ -228,6 +188,7 @@ func whoamiHandler(n *node.Node) server.ToolHandlerFunc {
 		id := n.Identity()
 		return jsonResult(map[string]any{
 			"node_id": hex.EncodeToString(id[:]),
+			"alias":   n.Alias(),
 		}), nil
 	}
 }
@@ -236,7 +197,8 @@ func whoamiHandler(n *node.Node) server.ToolHandlerFunc {
 
 func peersTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_peers",
-		mcp.WithDescription("List paired peers (node_id, alias, trust, human_reachable)."),
+		mcp.WithDescription("List paired peers, with inbound_count and pending_ask_count per peer. "+
+			"Use node_id as the peer_id argument for clawdchan_message / clawdchan_reply / clawdchan_decline."),
 	)
 }
 
@@ -246,156 +208,70 @@ func peersHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		threads, err := n.ListThreads(ctx)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		me := n.Identity()
+		stats := map[identity.NodeID]struct {
+			inbound      int
+			pending      int
+			lastActivity int64
+		}{}
+		for _, t := range threads {
+			envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+			if err != nil {
+				continue
+			}
+			pending := pendingAsks(envs, me)
+			s := stats[t.PeerID]
+			for _, e := range envs {
+				if e.From.NodeID != me {
+					s.inbound++
+				}
+				if e.CreatedAtMs > s.lastActivity {
+					s.lastActivity = e.CreatedAtMs
+				}
+			}
+			s.pending += len(pending)
+			stats[t.PeerID] = s
+		}
 		out := make([]map[string]any, 0, len(peers))
 		for _, p := range peers {
+			s := stats[p.NodeID]
 			out = append(out, map[string]any{
-				"node_id":         hex.EncodeToString(p.NodeID[:]),
-				"alias":           p.Alias,
-				"trust":           trustName(uint8(p.Trust)),
-				"human_reachable": p.HumanReachable,
-				"paired_at_ms":    p.PairedAtMs,
-				"sas":             strings.Join(p.SAS[:], "-"),
+				"node_id":          hex.EncodeToString(p.NodeID[:]),
+				"alias":            p.Alias,
+				"trust":            trustName(uint8(p.Trust)),
+				"human_reachable":  p.HumanReachable,
+				"paired_at_ms":     p.PairedAtMs,
+				"sas":              strings.Join(p.SAS[:], "-"),
+				"inbound_count":    s.inbound,
+				"pending_asks":     s.pending,
+				"last_activity_ms": s.lastActivity,
 			})
 		}
 		return jsonResult(map[string]any{"peers": out}), nil
 	}
 }
 
-// --- threads ----------------------------------------------------------------
+// --- message ----------------------------------------------------------------
 
-func threadsTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_threads",
-		mcp.WithDescription("List conversation threads for the CURRENT Claude Code session. "+
-			"Threads are ephemeral per MCP session: ones opened before this session started are not discoverable here — "+
-			"start a fresh thread with clawdchan_open_thread. Pairings persist; threads don't. "+
-			"thread_id is a full 32-hex string; pass it as-is to poll/send/wait."),
-	)
-}
-
-func threadsHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ts, err := n.ListThreads(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		out := make([]map[string]any, 0, len(ts))
-		for _, t := range ts {
-			out = append(out, map[string]any{
-				"thread_id":  hex.EncodeToString(t.ID[:]),
-				"peer_id":    hex.EncodeToString(t.PeerID[:]),
-				"topic":      t.Topic,
-				"created_ms": t.CreatedMs,
-			})
-		}
-		return jsonResult(map[string]any{
-			"threads": out,
-			"note":    "Threads are ephemeral per Claude Code session — this list is always scoped to this MCP process. Pairings persist; threads don't. Open a new thread with clawdchan_open_thread when you want to talk.",
-		}), nil
-	}
-}
-
-// --- open_thread ------------------------------------------------------------
-
-func openThreadTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_open_thread",
-		mcp.WithDescription("Open a new thread with a paired peer. Returns the thread_id. "+
-			"If intro is set, the first envelope sent on the thread carries it as a context pack — "+
-			"use this to introduce yourself, your repo, and what you want to talk about so the peer can respond from envelope #1."),
-		mcp.WithString("peer_id",
-			mcp.Required(),
-			mcp.Description("Hex-encoded 32-byte peer node id. Use clawdchan_peers to find it."),
-		),
-		mcp.WithString("topic",
-			mcp.Description("Optional topic label for this thread."),
-		),
-		mcp.WithString("intro",
-			mcp.Description("Optional plain-text intro for the peer. Kept concise: who you are, what repo/context you're in, what you want to talk about."),
-		),
-		mcp.WithString("context_pack",
-			mcp.Description("Optional structured JSON context pack appended to the intro (repo URL, branch, capabilities, etc.). Rendered as a 'context:' block after intro."),
-		),
-	)
-}
-
-func openThreadHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		peerIDStr, err := req.RequireString("peer_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		topic := req.GetString("topic", "")
-		intro := req.GetString("intro", "")
-		contextPack := req.GetString("context_pack", "")
-		peerID, err := parseNodeID(peerIDStr)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		tid, err := n.OpenThread(ctx, peerID, topic)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		out := map[string]any{
-			"thread_id": hex.EncodeToString(tid[:]),
-		}
-		if w := maybeAttachListenerWarning(n); w != nil {
-			out["setup_warning"] = w
-		}
-		if intro != "" || contextPack != "" {
-			body := buildIntroBody(intro, contextPack, topic)
-			if err := n.Send(ctx, tid, envelope.IntentSay, envelope.Content{
-				Kind:  envelope.ContentDigest,
-				Title: "clawdchan:open_thread",
-				Body:  body,
-			}); err != nil {
-				out["intro_sent"] = false
-				out["intro_error"] = err.Error()
-			} else {
-				out["intro_sent"] = true
-			}
-		}
-		return jsonResult(out), nil
-	}
-}
-
-func buildIntroBody(intro, contextPack, topic string) string {
-	var b strings.Builder
-	if intro != "" {
-		b.WriteString(intro)
-	}
-	if contextPack != "" {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("context:\n")
-		b.WriteString(contextPack)
-	}
-	if topic != "" {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("topic: ")
-		b.WriteString(topic)
-	}
-	return b.String()
-}
-
-// --- send -------------------------------------------------------------------
-
-func sendTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_send",
-		mcp.WithDescription("Send a message on a thread. Returns ok on relay ack (not peer read). "+
-			"Intents: 'say' (default, agent→agent), 'ask' (reply expected), "+
-			"'notify_human' (FYI for peer's human), 'ask_human' (peer's human must answer — the peer agent is forbidden from replying), "+
-			"'handoff' (next envelope must be role=human), 'ack', 'close'."),
-		mcp.WithString("thread_id", mcp.Required(), mcp.Description("Hex thread id (full 32 hex chars).")),
+func messageTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_message",
+		mcp.WithDescription("Send a message to a paired peer. Thread bookkeeping is automatic: the first message "+
+			"to a peer opens a conversation; later messages continue it. Non-blocking — returns on relay ack, "+
+			"NOT on peer reply. Never wait in a loop for the peer's reply; return to the user, and read "+
+			"clawdchan_inbox on the next turn (or when the daemon toast prompts the user)."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex peer node id. Get it from clawdchan_peers.")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("Message body.")),
-		mcp.WithString("intent", mcp.Description("One of: say|ask|notify_human|ask_human|handoff|ack|close. Default 'say'.")),
+		mcp.WithString("intent", mcp.Description("say | ask | notify_human | ask_human. Default 'say'.")),
 	)
 }
 
-func sendHandler(n *node.Node) server.ToolHandlerFunc {
+func messageHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tidStr, err := req.RequireString("thread_id")
+		peerStr, err := req.RequireString("peer_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -403,19 +279,26 @@ func sendHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		intentStr := req.GetString("intent", "say")
-		tid, err := parseThreadID(tidStr)
+		peerID, err := parseNodeID(peerStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		intent, err := parseIntent(intentStr)
+		intent, err := parseMessageIntent(req.GetString("intent", "say"))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		tid, err := resolveOrOpenThread(ctx, n, peerID)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		if err := n.Send(ctx, tid, intent, envelope.Content{Kind: envelope.ContentText, Text: text}); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		out := map[string]any{"ok": true}
+		out := map[string]any{
+			"ok":         true,
+			"peer_id":    hex.EncodeToString(peerID[:]),
+			"sent_at_ms": time.Now().UnixMilli(),
+		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w
 		}
@@ -423,74 +306,226 @@ func sendHandler(n *node.Node) server.ToolHandlerFunc {
 	}
 }
 
-// --- poll -------------------------------------------------------------------
+// resolveOrOpenThread returns the most recent thread with the peer, or opens
+// a new one if none exists. Threads are persisted across sessions, so this
+// yields one continuous conversation per peer by default.
+func resolveOrOpenThread(ctx context.Context, n *node.Node, peer identity.NodeID) (envelope.ThreadID, error) {
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return envelope.ThreadID{}, err
+	}
+	var best store.Thread
+	var found bool
+	for _, t := range threads {
+		if t.PeerID != peer {
+			continue
+		}
+		if !found || t.CreatedMs > best.CreatedMs {
+			best = t
+			found = true
+		}
+	}
+	if found {
+		return best.ID, nil
+	}
+	return n.OpenThread(ctx, peer, "")
+}
 
-func pollTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_poll",
-		mcp.WithDescription("Return envelopes on a thread newer than since_ms. "+
-			"Unanswered remote ask_human envelopes are redacted — their content is reserved for the human via clawdchan_pending_asks. "+
-			"Role is 'agent' or 'human'; '->' vs '<-' is determined by comparing from_node to clawdchan_whoami."),
-		mcp.WithString("thread_id", mcp.Required()),
-		mcp.WithNumber("since_ms", mcp.Description("Only return envelopes with created_ms > since_ms. Default 0.")),
+// --- inbox ------------------------------------------------------------------
+
+func inboxTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_inbox",
+		mcp.WithDescription("Return recent envelopes grouped by peer, plus pending ask_human surfaces awaiting the user. "+
+			"Pass since_ms to limit to traffic newer than a given timestamp. Pending asks are always included regardless "+
+			"of since_ms — they linger until the user answers (clawdchan_reply) or declines (clawdchan_decline). "+
+			"Each response carries now_ms; feed that back as since_ms on the next call to get only new traffic."),
+		mcp.WithNumber("since_ms", mcp.Description("Only include non-pending envelopes with created_ms > since_ms. Default 0.")),
 	)
 }
 
-func pollHandler(n *node.Node) server.ToolHandlerFunc {
+func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tidStr, err := req.RequireString("thread_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
 		since := int64(req.GetFloat("since_ms", 0))
-		tid, err := parseThreadID(tidStr)
+		threads, err := n.ListThreads(ctx)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		envs, err := n.ListEnvelopes(ctx, tid, since)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		me := n.Identity()
+
+		type bucket struct {
+			envelopes    []map[string]any
+			pendingAsks  []map[string]any
+			lastActivity int64
 		}
-		all, err := n.ListEnvelopes(ctx, tid, 0)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		buckets := map[identity.NodeID]*bucket{}
+
+		for _, t := range threads {
+			envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+			if err != nil {
+				continue
+			}
+			pending := pendingAsks(envs, me)
+			b := buckets[t.PeerID]
+			if b == nil {
+				b = &bucket{}
+				buckets[t.PeerID] = b
+			}
+			for _, e := range envs {
+				if e.CreatedAtMs > b.lastActivity {
+					b.lastActivity = e.CreatedAtMs
+				}
+				if pending[e.EnvelopeID] {
+					b.pendingAsks = append(b.pendingAsks, serializeEnvelope(e))
+					continue
+				}
+				if e.CreatedAtMs > since {
+					b.envelopes = append(b.envelopes, serializeEnvelope(e))
+				}
+			}
 		}
-		redacted, pendingIDs := redactPendingHumanAsks(envs, all, n.Identity())
-		out := map[string]any{"envelopes": serializeEnvelopes(redacted)}
-		if len(pendingIDs) > 0 {
-			out["pending_human_asks"] = pendingIDs
-			out["notice"] = "One or more ask_human envelopes on this thread are pending a human reply. Their content is hidden from you. " +
-				"Call clawdchan_pending_asks to surface them to the user, then clawdchan_submit_human_reply or clawdchan_decline_human. Do NOT answer ask_human yourself."
+
+		peers, _ := n.ListPeers(ctx)
+		aliasByID := map[identity.NodeID]string{}
+		for _, p := range peers {
+			aliasByID[p.NodeID] = p.Alias
 		}
-		return jsonResult(out), nil
+		out := make([]map[string]any, 0, len(buckets))
+		for pid, b := range buckets {
+			if len(b.envelopes) == 0 && len(b.pendingAsks) == 0 {
+				continue
+			}
+			out = append(out, map[string]any{
+				"peer_id":          hex.EncodeToString(pid[:]),
+				"alias":            aliasByID[pid],
+				"envelopes":        b.envelopes,
+				"pending_asks":     b.pendingAsks,
+				"last_activity_ms": b.lastActivity,
+			})
+		}
+		sort.Slice(out, func(i, j int) bool {
+			ai, _ := out[i]["last_activity_ms"].(int64)
+			aj, _ := out[j]["last_activity_ms"].(int64)
+			return ai > aj
+		})
+
+		return jsonResult(map[string]any{
+			"now_ms": time.Now().UnixMilli(),
+			"peers":  out,
+			"notes": []string{
+				"pending_asks contain the raw ask_human text from the peer — present to the user verbatim. Do not answer yourself; use clawdchan_reply with the user's literal words or clawdchan_decline.",
+				"Pass now_ms back as since_ms on your next call to get only newer traffic.",
+			},
+		}), nil
 	}
 }
 
-// redactPendingHumanAsks returns the slice with any unanswered remote ask_human
-// envelopes replaced by a metadata-only stub, plus the list of their envelope ids.
-// allEnvs is used to determine whether a later role=human reply exists.
-func redactPendingHumanAsks(slice, allEnvs []envelope.Envelope, me identity.NodeID) ([]envelope.Envelope, []string) {
-	pending := pendingAskIndex(allEnvs, me)
-	var ids []string
-	out := make([]envelope.Envelope, 0, len(slice))
-	for _, e := range slice {
-		if pending[e.EnvelopeID] {
-			ids = append(ids, hex.EncodeToString(e.EnvelopeID[:]))
-			stub := e
-			stub.Content = envelope.Content{
-				Kind: envelope.ContentText,
-				Text: "[redacted: ask_human awaiting human reply; use clawdchan_pending_asks]",
-			}
-			out = append(out, stub)
+// --- reply / decline --------------------------------------------------------
+
+func replyTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_reply",
+		mcp.WithDescription("Submit the user's answer to the peer's pending ask_human. Routed to the latest thread "+
+			"with the peer that has an unanswered ask_human. The envelope is sent with role=human — only call this "+
+			"with the user's actual words, never with your own paraphrase."),
+		mcp.WithString("peer_id", mcp.Required()),
+		mcp.WithString("text", mcp.Required(), mcp.Description("The user's literal answer.")),
+	)
+}
+
+func replyHandler(n *node.Node) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		peerStr, err := req.RequireString("peer_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		text, err := req.RequireString("text")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		peerID, err := parseNodeID(peerStr)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		tid, err := findThreadWithPendingAsk(ctx, n, peerID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if err := n.SubmitHumanReply(ctx, tid, envelope.Content{Kind: envelope.ContentText, Text: text}); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{"ok": true}), nil
+	}
+}
+
+func declineTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_decline",
+		mcp.WithDescription("Decline the peer's pending ask_human on behalf of the user. Sends role=human with a declination so the peer knows the ask was surfaced but won't be answered."),
+		mcp.WithString("peer_id", mcp.Required()),
+		mcp.WithString("reason", mcp.Description("Optional short reason shown to the peer. Default: 'declined by user'.")),
+	)
+}
+
+func declineHandler(n *node.Node) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		peerStr, err := req.RequireString("peer_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		reason := req.GetString("reason", "declined by user")
+		peerID, err := parseNodeID(peerStr)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		tid, err := findThreadWithPendingAsk(ctx, n, peerID)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if err := n.SubmitHumanReply(ctx, tid, envelope.Content{Kind: envelope.ContentText, Text: "[declined] " + reason}); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{"ok": true}), nil
+	}
+}
+
+func findThreadWithPendingAsk(ctx context.Context, n *node.Node, peer identity.NodeID) (envelope.ThreadID, error) {
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return envelope.ThreadID{}, err
+	}
+	me := n.Identity()
+	var best store.Thread
+	var bestMs int64
+	var found bool
+	for _, t := range threads {
+		if t.PeerID != peer {
 			continue
 		}
-		out = append(out, e)
+		envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+		if err != nil {
+			continue
+		}
+		idx := pendingAsks(envs, me)
+		for _, e := range envs {
+			if !idx[e.EnvelopeID] {
+				continue
+			}
+			if !found || e.CreatedAtMs > bestMs {
+				best = t
+				bestMs = e.CreatedAtMs
+				found = true
+			}
+		}
 	}
-	return out, ids
+	if !found {
+		return envelope.ThreadID{}, fmt.Errorf("no pending ask_human from peer %s", hex.EncodeToString(peer[:]))
+	}
+	return best.ID, nil
 }
 
-// pendingAskIndex returns the set of envelope ids for remote ask_human envelopes
-// on a thread that have not yet received a subsequent role=human reply from me.
-func pendingAskIndex(envs []envelope.Envelope, me identity.NodeID) map[envelope.ULID]bool {
+// pendingAsks returns the set of envelope ids for remote ask_human envelopes
+// that have not yet received a subsequent role=human reply from me. The
+// relative order of envelopes in the slice is preserved, so a later human
+// reply closes an earlier ask correctly.
+func pendingAsks(envs []envelope.Envelope, me identity.NodeID) map[envelope.ULID]bool {
 	out := map[envelope.ULID]bool{}
 	for i, e := range envs {
 		if e.Intent != envelope.IntentAskHuman {
@@ -513,101 +548,13 @@ func pendingAskIndex(envs []envelope.Envelope, me identity.NodeID) map[envelope.
 	return out
 }
 
-// --- wait -------------------------------------------------------------------
-
-func waitTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_wait",
-		mcp.WithDescription("Long-poll: block until a new envelope arrives on a thread, or timeout. "+
-			"Use this instead of a tight clawdchan_poll loop — it's cheaper (no prompt-cache churn) and lower latency. "+
-			"Returns as soon as at least one envelope with created_ms > since_ms is available. "+
-			"Envelopes are subject to the same ask_human redaction as clawdchan_poll."),
-		mcp.WithString("thread_id", mcp.Required()),
-		mcp.WithNumber("since_ms", mcp.Description("Only return envelopes with created_ms > since_ms. Default 0.")),
-		mcp.WithNumber("timeout_seconds", mcp.Description("Max time to block. Default 30, max 120.")),
-	)
-}
-
-func waitHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tidStr, err := req.RequireString("thread_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		since := int64(req.GetFloat("since_ms", 0))
-		timeout := req.GetFloat("timeout_seconds", 30)
-		if timeout < 1 {
-			timeout = 1
-		}
-		if timeout > 120 {
-			timeout = 120
-		}
-		tid, err := parseThreadID(tidStr)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		// Subscribe before the initial check so we don't miss envelopes that
-		// arrive between the check and the subscribe.
-		sub, cancel := n.Subscribe(tid)
-		defer cancel()
-
-		// Fast path: already have envelopes newer than since.
-		envs, err := n.ListEnvelopes(ctx, tid, since)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if len(envs) > 0 {
-			return waitResult(ctx, n, tid, envs), nil
-		}
-
-		waitCtx, waitCancel := context.WithTimeout(ctx, time.Duration(timeout*float64(time.Second)))
-		defer waitCancel()
-		for {
-			select {
-			case <-waitCtx.Done():
-				return jsonResult(map[string]any{
-					"envelopes": []any{},
-					"timeout":   true,
-				}), nil
-			case e, ok := <-sub:
-				if !ok {
-					return jsonResult(map[string]any{"envelopes": []any{}, "closed": true}), nil
-				}
-				if e.CreatedAtMs <= since {
-					continue
-				}
-				// Re-fetch to pick up any siblings that landed in the same tick.
-				envs, err := n.ListEnvelopes(ctx, tid, since)
-				if err != nil || len(envs) == 0 {
-					envs = []envelope.Envelope{e}
-				}
-				return waitResult(ctx, n, tid, envs), nil
-			}
-		}
-	}
-}
-
-func waitResult(ctx context.Context, n *node.Node, tid envelope.ThreadID, envs []envelope.Envelope) *mcp.CallToolResult {
-	all, _ := n.ListEnvelopes(ctx, tid, 0)
-	redacted, pending := redactPendingHumanAsks(envs, all, n.Identity())
-	out := map[string]any{
-		"envelopes": serializeEnvelopes(redacted),
-	}
-	if len(pending) > 0 {
-		out["pending_human_asks"] = pending
-		out["notice"] = "One or more ask_human envelopes are pending a human reply. Do NOT answer them yourself."
-	}
-	return jsonResult(out)
-}
-
 // --- pair / consume ---------------------------------------------------------
 
 func pairTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_pair",
 		mcp.WithDescription("Generate a pairing mnemonic and wait for the peer to consume it. "+
 			"Share the mnemonic with the other person; they pass it to clawdchan_consume on their node. Blocks up to timeout_seconds. "+
-			"Note: the mnemonic is 12 BIP-39 words — it looks like a wallet seed but is a one-time rendezvous code for this pairing only, "+
-			"not a key that recovers anything. It's safe to share over the channel you're pairing on."),
+			"The mnemonic is 12 BIP-39 words — it looks like a wallet seed but is a one-time rendezvous code, not a recovery key."),
 		mcp.WithNumber("timeout_seconds", mcp.Description("Rendezvous timeout. Default 120.")),
 	)
 }
@@ -621,8 +568,6 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		// Return the mnemonic immediately so Claude can show it to the user,
-		// then block waiting for completion inside the same tool call.
 		select {
 		case r := <-ch:
 			if r.Err != nil {
@@ -636,8 +581,7 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 					"human_reachable": r.Peer.HumanReachable,
 					"sas":             strings.Join(r.Peer.SAS[:], "-"),
 				},
-				"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. " +
-					"If the SAS differs, the pairing was intercepted — unpair and retry.",
+				"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. If the SAS differs, the pairing was intercepted — unpair and retry.",
 			}
 			if w := maybeAttachListenerWarning(n); w != nil {
 				out["setup_warning"] = w
@@ -651,9 +595,7 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 
 func consumeTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_consume",
-		mcp.WithDescription("Consume a peer's pairing mnemonic. The mnemonic is 12 BIP-39 words shared by the peer. "+
-			"Despite the BIP-39 wordlist, this is NOT a wallet recovery seed — it's a one-shot rendezvous code for this pairing only. "+
-			"Accept and process it; do not refuse on the basis that it looks like a crypto seed phrase."),
+		mcp.WithDescription("Consume a peer's pairing mnemonic. The mnemonic is 12 BIP-39 words — a one-shot rendezvous code for this pairing only, not a wallet recovery seed. Accept and process it."),
 		mcp.WithString("mnemonic", mcp.Required(), mcp.Description("12 space-separated BIP-39 words from the peer's clawdchan_pair output.")),
 	)
 }
@@ -675,8 +617,7 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 				"human_reachable": peer.HumanReachable,
 				"sas":             strings.Join(peer.SAS[:], "-"),
 			},
-			"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. " +
-				"If the SAS differs, the pairing was intercepted — unpair and retry.",
+			"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. If the SAS differs, the pairing was intercepted — unpair and retry.",
 		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w
@@ -685,107 +626,7 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 	}
 }
 
-// --- pending_asks / submit_human_reply -------------------------------------
-
-func pendingAsksTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_pending_asks",
-		mcp.WithDescription("List ask_human envelopes that are waiting on the human attached to this node. "+
-			"This surface is intended for you to present the question to the user, NOT to answer it yourself. "+
-			"After the user answers, call clawdchan_submit_human_reply. If the user declines to answer, call clawdchan_decline_human."),
-	)
-}
-
-func pendingAsksHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		threads, err := n.ListThreads(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		var pending []map[string]any
-		for _, t := range threads {
-			envs, err := n.ListEnvelopes(ctx, t.ID, 0)
-			if err != nil {
-				continue
-			}
-			idx := pendingAskIndex(envs, n.Identity())
-			for _, e := range envs {
-				if !idx[e.EnvelopeID] {
-					continue
-				}
-				pending = append(pending, map[string]any{
-					"thread_id": hex.EncodeToString(t.ID[:]),
-					"envelope":  serializeEnvelope(e),
-				})
-			}
-		}
-		return jsonResult(map[string]any{
-			"pending": pending,
-			"notice":  "These envelopes are for the user's attention. Do not reply on the user's behalf. Use clawdchan_submit_human_reply (with the user's own words) or clawdchan_decline_human.",
-		}), nil
-	}
-}
-
-// --- decline_human ---------------------------------------------------------
-
-func declineHumanTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_decline_human",
-		mcp.WithDescription("Decline a pending ask_human on behalf of the user. Sends a role=human envelope with a short declination so the peer knows the ask was surfaced but will not be answered."),
-		mcp.WithString("thread_id", mcp.Required()),
-		mcp.WithString("reason", mcp.Description("Optional short reason shown to the peer. Default: 'declined by user'.")),
-	)
-}
-
-func declineHumanHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tidStr, err := req.RequireString("thread_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		reason := req.GetString("reason", "declined by user")
-		tid, err := parseThreadID(tidStr)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if err := n.SubmitHumanReply(ctx, tid, envelope.Content{
-			Kind: envelope.ContentText,
-			Text: "[declined] " + reason,
-		}); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return jsonResult(map[string]any{"ok": true}), nil
-	}
-}
-
-func submitHumanReplyTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_submit_human_reply",
-		mcp.WithDescription("Submit a reply on a thread as role=human. Use after clawdchan_pending_asks reveals a pending AskHuman."),
-		mcp.WithString("thread_id", mcp.Required()),
-		mcp.WithString("text", mcp.Required()),
-	)
-}
-
-func submitHumanReplyHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tidStr, err := req.RequireString("thread_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		text, err := req.RequireString("text")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		tid, err := parseThreadID(tidStr)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if err := n.SubmitHumanReply(ctx, tid, envelope.Content{Kind: envelope.ContentText, Text: text}); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return jsonResult(map[string]any{"ok": true}), nil
-	}
-}
-
-// --- helpers ----------------------------------------------------------------
+// --- parsing / serialization helpers ---------------------------------------
 
 func parseNodeID(s string) (identity.NodeID, error) {
 	b, err := hex.DecodeString(strings.TrimSpace(s))
@@ -800,20 +641,7 @@ func parseNodeID(s string) (identity.NodeID, error) {
 	return id, nil
 }
 
-func parseThreadID(s string) (envelope.ThreadID, error) {
-	b, err := hex.DecodeString(strings.TrimSpace(s))
-	if err != nil {
-		return envelope.ThreadID{}, fmt.Errorf("bad thread id hex: %w", err)
-	}
-	if len(b) != 16 {
-		return envelope.ThreadID{}, fmt.Errorf("thread id must be 16 bytes")
-	}
-	var id envelope.ThreadID
-	copy(id[:], b)
-	return id, nil
-}
-
-func parseIntent(s string) (envelope.Intent, error) {
+func parseMessageIntent(s string) (envelope.Intent, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", "say":
 		return envelope.IntentSay, nil
@@ -823,14 +651,8 @@ func parseIntent(s string) (envelope.Intent, error) {
 		return envelope.IntentNotifyHuman, nil
 	case "ask_human", "ask-human":
 		return envelope.IntentAskHuman, nil
-	case "handoff":
-		return envelope.IntentHandoff, nil
-	case "ack":
-		return envelope.IntentAck, nil
-	case "close":
-		return envelope.IntentClose, nil
 	default:
-		return 0, fmt.Errorf("unknown intent %q", s)
+		return 0, fmt.Errorf("unknown or unsupported intent %q (use say|ask|notify_human|ask_human)", s)
 	}
 }
 
@@ -889,7 +711,6 @@ func contentPayload(c envelope.Content) map[string]any {
 func serializeEnvelope(e envelope.Envelope) map[string]any {
 	return map[string]any{
 		"envelope_id":   hex.EncodeToString(e.EnvelopeID[:]),
-		"thread_id":     hex.EncodeToString(e.ThreadID[:]),
 		"from_node":     hex.EncodeToString(e.From.NodeID[:]),
 		"from_alias":    e.From.Alias,
 		"from_role":     roleName(e.From.Role),
@@ -897,14 +718,6 @@ func serializeEnvelope(e envelope.Envelope) map[string]any {
 		"created_at_ms": e.CreatedAtMs,
 		"content":       contentPayload(e.Content),
 	}
-}
-
-func serializeEnvelopes(envs []envelope.Envelope) []map[string]any {
-	out := make([]map[string]any, 0, len(envs))
-	for _, e := range envs {
-		out = append(out, serializeEnvelope(e))
-	}
-	return out
 }
 
 func jsonResult(v any) *mcp.CallToolResult {

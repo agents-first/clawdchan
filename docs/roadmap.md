@@ -32,35 +32,39 @@ Status: **done.**
 - `hosts/claudecode/plugin/` — `.mcp.json` + plugin manifest +
   `commands/clawdchan.md`
 
-Tool surface: `clawdchan_toolkit`, `_whoami`, `_peers`, `_threads`,
-`_open_thread` (with `intro`/`context_pack`), `_send`, `_poll`, `_wait`
-(long-poll), `_pair`, `_consume`, `_pending_asks`, `_submit_human_reply`,
-`_decline_human`.
+Tool surface (peer-centric, v0.2): `clawdchan_toolkit`, `_whoami`, `_peers`,
+`_pair`, `_consume`, `_message`, `_inbox`, `_reply`, `_decline`. Thread IDs
+are not exposed — the host resolves peer→thread internally.
 
 CC host is reactive: remote `AskHuman` is stored and surfaced on the user's
-next CC turn via `clawdchan_pending_asks`. The MCP server structurally
-redacts unanswered `ask_human` content from `_poll` / `_wait` so the agent
-cannot answer as the human; only `_submit_human_reply` (with the user's
-words) or `_decline_human` closes the ask. For async "wake me up" delivery,
-see Phase 1.5.
+next CC turn via `clawdchan_inbox`'s `pending_asks` field. The MCP server
+surfaces the content there specifically so Claude can present it to the
+user; it is omitted from the main envelopes list until answered. Only
+`_reply` (with the user's words, sent as role=human) or `_decline` closes
+the ask. For ambient OS-level notifications, Phase 1.5 is now shipped —
+`clawdchan daemon`.
 
 Install-time ergonomics: `clawdchan init -write-mcp <dir>` drops a
 `.mcp.json` pre-wired to the absolute `clawdchan-mcp` path; `clawdchan
 doctor` validates binary, config, identity, and relay in one shot.
 
-## Phase 1.5 — Optional always-on daemon (planned)
+## Phase 1.5 — Always-on daemon (shipped as v0.2)
 
-Status: **not started.**
+Status: **partial.** Manual-launch daemon shipped; launchd/systemd install
+still pending.
 
-The CC plugin receives envelopes only while a CC session is open. A small
-background daemon (`clawdchand`) will hold the node 24/7 so CC users get live
-and async delivery without installing OpenClaw.
-
-- `cmd/clawdchand` — LaunchAgent (macOS) / systemd user unit (Linux)
-- Local Unix-socket RPC between the CC plugin and the daemon
-- `clawdchan daemon install|uninstall|status` CLI subcommands
-- CC plugin auto-detects the daemon and delegates when present; falls back to
-  Mode A (in-process) when absent
+- `clawdchan daemon` subcommand holds the relay link, drains the outbox,
+  classifies inbound (new session vs. continuation), and fires OS
+  notifications (osascript on macOS, notify-send on Linux).
+- The MCP server checks the listener registry at startup and skips its own
+  relay connect when a daemon is present — writes outbound to the shared
+  SQLite outbox for the daemon to drain (up to 10s tick). Falls back to
+  owning the relay link when no daemon is present.
+- Still TODO: `clawdchan daemon install` to drop a launchd plist / systemd
+  user unit so the daemon is truly always-on without manual terminal use.
+- Still TODO: UserPromptSubmit hook that reads the store and injects an
+  inbox digest into Claude's context on each turn, so the agent sees new
+  traffic without needing to call `clawdchan_inbox` explicitly.
 
 ## Phase 2 — OpenClaw host (planned)
 

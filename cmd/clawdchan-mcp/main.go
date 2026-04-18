@@ -3,8 +3,12 @@
 // process communicates with it via JSON-RPC on stdin/stdout.
 //
 // On startup the server loads its config from $CLAWDCHAN_HOME/config.json
-// (defaulting to ~/.clawdchan), opens the SQLite store, connects to the
-// configured relay, and exposes the ClawdChan tool surface.
+// (defaulting to ~/.clawdchan), opens the SQLite store, and exposes the
+// ClawdChan tool surface. It does NOT connect to the relay if a persistent
+// daemon is already running for this node (detected via the listener
+// registry): the daemon owns the relay link and the MCP server reads/writes
+// the shared store. When no daemon is running, the MCP server falls back to
+// owning the relay link for the lifetime of the Claude Code session.
 package main
 
 import (
@@ -16,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -31,7 +36,7 @@ type config struct {
 	Alias    string `json:"alias"`
 }
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	log.SetOutput(os.Stderr) // stdout is the MCP channel
@@ -42,12 +47,11 @@ func main() {
 	}
 
 	n, err := node.New(node.Config{
-		DataDir:   cfg.DataDir,
-		RelayURL:  cfg.RelayURL,
-		Alias:     cfg.Alias,
-		Human:     claudecode.HumanSurface{},
-		Agent:     claudecode.AgentSurface{},
-		Ephemeral: true, // one MCP process = one Claude Code session = fresh threads
+		DataDir:  cfg.DataDir,
+		RelayURL: cfg.RelayURL,
+		Alias:    cfg.Alias,
+		Human:    claudecode.HumanSurface{},
+		Agent:    claudecode.AgentSurface{},
 	})
 	if err != nil {
 		log.Fatalf("clawdchan-mcp: new node: %v", err)
@@ -56,13 +60,18 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := n.Start(ctx); err != nil {
-		log.Fatalf("clawdchan-mcp: start node: %v", err)
-	}
-	defer n.Stop()
 
-	// Handle SIGINT/SIGTERM gracefully even though ServeStdio also installs
-	// its own handlers; ours ensures the node shuts down cleanly.
+	id := n.Identity()
+	daemon := daemonRunning(cfg.DataDir, hex.EncodeToString(id[:]))
+	if daemon {
+		log.Printf("clawdchan-mcp: daemon detected, skipping relay connect (daemon owns inbound + outbox drain)")
+	} else {
+		if err := n.Start(ctx); err != nil {
+			log.Fatalf("clawdchan-mcp: start node: %v", err)
+		}
+		defer n.Stop()
+	}
+
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -73,7 +82,6 @@ func main() {
 	s := server.NewMCPServer("clawdchan", version)
 	claudecode.RegisterTools(s, n)
 
-	id := n.Identity()
 	unregister, regErr := listenerreg.Register(
 		cfg.DataDir, listenerreg.KindMCP,
 		hex.EncodeToString(id[:]), cfg.RelayURL, cfg.Alias,
@@ -83,11 +91,31 @@ func main() {
 	}
 	defer unregister()
 
-	log.Printf("clawdchan-mcp ready (alias=%q node=%x relay=%s)", cfg.Alias, id[:8], cfg.RelayURL)
+	log.Printf("clawdchan-mcp ready (alias=%q node=%x relay=%s daemon=%v)", cfg.Alias, id[:8], cfg.RelayURL, daemon)
 
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("clawdchan-mcp: serve: %v", err)
 	}
+}
+
+// daemonRunning reports whether another process is already holding the relay
+// link for this node — i.e. a running `clawdchan daemon` (or `clawdchan
+// listen`). Both register as KindCLI. Presence tells the MCP server to skip
+// its own relay connect and let the daemon own inbound and outbox drain.
+func daemonRunning(dataDir, nodeID string) bool {
+	entries, err := listenerreg.List(dataDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !strings.EqualFold(e.NodeID, nodeID) {
+			continue
+		}
+		if e.Kind == listenerreg.KindCLI {
+			return true
+		}
+	}
+	return false
 }
 
 func loadConfig() (config, error) {

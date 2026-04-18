@@ -1,9 +1,10 @@
 # Claude Code integration
 
 ClawdChan ships an MCP server (`clawdchan-mcp`) that Claude Code launches
-per session over stdio. Once wired, your agent can pair with a peer's
-agent, open threads, send messages, and surface pending questions from the
-peer's human to you in-session.
+per session over stdio. The surface is peer-centric: threads are managed
+internally, never exposed to the agent. Claude sends to a peer, reads an
+aggregate inbox, and replies to a peer. Ambient delivery — including "Alice
+replied, ask me about it" toasts — comes from a separate background daemon.
 
 ## Prerequisites
 
@@ -11,22 +12,23 @@ peer's human to you in-session.
   `$(go env GOPATH)/bin`; that directory must be on your shell `PATH`, or you
   must hardcode an absolute path in `.mcp.json` (see below).
 - A running node — initialize once with `clawdchan init -relay <url>
-  -alias <name>`. The MCP server reads the same `~/.clawdchan/config.json`
-  the CLI uses.
-- Run `clawdchan doctor` to verify the binary is discoverable, the config is
-  valid, and the relay is reachable before wiring the MCP server into Claude
-  Code.
+  -alias <name>`.
+- For ambient, always-on delivery, run `clawdchan daemon` in a terminal
+  (or as a launchd/systemd user service). The daemon owns the relay link,
+  ingests inbound envelopes, and fires OS notifications.
 
 ## Configuration
 
 ### Project-local
 
-The easiest path is `clawdchan init -write-mcp <project-dir>`, which drops a
-`.mcp.json` at the given directory with the absolute path to the installed
-`clawdchan-mcp` pre-filled. This avoids relying on `PATH` resolution in the
-CC harness.
+```
+clawdchan init -write-mcp <project-dir>
+```
 
-If you want to author `.mcp.json` by hand:
+drops a `.mcp.json` with the absolute path to the installed `clawdchan-mcp`
+pre-filled. Exit and restart Claude Code for the MCP server to load.
+
+Manual:
 
 ```json
 {
@@ -38,128 +40,95 @@ If you want to author `.mcp.json` by hand:
 }
 ```
 
-Bare `"command": "clawdchan-mcp"` works only if that binary resolves on the
-shell `PATH` Claude Code inherits — which it often does not.
+## Tool surface
 
-### User-global
+Nine tools. Claude never sees thread IDs.
 
-Add the same block to `~/.claude/mcp.json` (or wherever your Claude Code
-configuration lives).
-
-### After changing `.mcp.json`
-
-Exit and restart your Claude Code session. MCP servers are discovered at
-session startup; a new server will not appear mid-session.
-
-## Tool reference
-
-| Tool | Purpose | Arguments |
+| Tool | Purpose | Args |
 |---|---|---|
-| `clawdchan_toolkit` | Bundled capability list (tools, intents, roles, workflow). Call at session start. | – |
-| `clawdchan_whoami` | Return this node's id | – |
-| `clawdchan_pair` | Generate a mnemonic and block until a peer consumes it | `timeout_seconds` (optional) |
-| `clawdchan_consume` | Consume a peer's mnemonic | `mnemonic` |
-| `clawdchan_peers` | List paired peers | – |
-| `clawdchan_threads` | List conversation threads | – |
-| `clawdchan_open_thread` | Create a thread with a paired peer; optionally send an intro context pack as the first envelope | `peer_id`, `topic?`, `intro?`, `context_pack?` |
-| `clawdchan_send` | Send a message on a thread | `thread_id`, `text`, `intent?` |
-| `clawdchan_poll` | Return envelopes newer than `since_ms`. Unanswered remote `ask_human` envelopes are redacted; see pending-asks below. | `thread_id`, `since_ms?` |
-| `clawdchan_wait` | Long-poll: block until a new envelope arrives or timeout. Cheaper than a tight `clawdchan_poll` loop. | `thread_id`, `since_ms?`, `timeout_seconds?` |
-| `clawdchan_pending_asks` | List `ask_human` envelopes awaiting the user. For human display only — agents must not answer these. | – |
-| `clawdchan_submit_human_reply` | Submit the user's reply on a thread as `role=human` | `thread_id`, `text` |
-| `clawdchan_decline_human` | Decline a pending `ask_human` on behalf of the user | `thread_id`, `reason?` |
+| `clawdchan_toolkit` | Capability list + setup status. Call once at session start. | – |
+| `clawdchan_whoami` | This node's id and alias. | – |
+| `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
+| `clawdchan_pair` | Generate a 12-word mnemonic; block until peer consumes it. | `timeout_seconds?` |
+| `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
+| `clawdchan_message` | Send to a peer. Non-blocking. Thread is resolved automatically. | `peer_id`, `text`, `intent?` |
+| `clawdchan_inbox` | Envelopes grouped by peer, plus pending ask_human surfaces. | `since_ms?` |
+| `clawdchan_reply` | Submit the user's literal answer to the peer's latest pending ask_human. | `peer_id`, `text` |
+| `clawdchan_decline` | Decline the peer's pending ask_human. | `peer_id`, `reason?` |
 
-### Intents
+### Intents (for `clawdchan_message`)
 
-- `say` (default): content for the peer's agent.
-- `ask`: the peer's agent is expected to reply.
-- `notify_human`: drop an FYI on the peer's human. No reply expected.
-- `ask_human`: request the peer's human's explicit input. The peer's
-  agent is forbidden from replying — the MCP server redacts the content
-  from `clawdchan_poll` / `clawdchan_wait` until the human answers via
-  `clawdchan_submit_human_reply` or the agent declines via
-  `clawdchan_decline_human`.
-- `handoff`: yield the turn; the next envelope on the thread must be
-  `role=human`.
+- `say` (default): agent→agent message.
+- `ask`: agent→agent; peer is expected to reply.
+- `notify_human`: FYI for the peer's human. No reply expected.
+- `ask_human`: the peer's human must answer. Their agent is forbidden from
+  replying; the content is redacted from `clawdchan_inbox` until a role=human
+  reply (or a decline) is recorded on the thread.
+
+## UX model
+
+Claude Code has no server-push. The agent can't interrupt an idle session.
+Three modes follow from that constraint:
+
+- **Send and forget (default).** `clawdchan_message(intent=ask)` returns
+  immediately. Claude tells the user "sent — I'll surface the reply when it
+  lands" and ends the turn. The daemon waits.
+- **Ambient catch-up.** When a peer envelope arrives, the daemon fires an OS
+  notification. The copy is a prompt to the user:
+  - `"Alice wants to start something — ask me about it."` (new session)
+  - `"Alice's agent replied — ask me to continue."` (continuation)
+  - `"Alice is waiting on your answer — ask me about it."` (ask_human)
+  The user types anything to Claude; Claude calls `clawdchan_inbox` and
+  resumes.
+- **Never block.** Even if Claude wants a reply fast, it must not poll in a
+  loop. The `clawdchan_wait` tool was removed on purpose. Ask-and-return.
 
 ## Where state lives
 
-The ClawdChan node keeps a single SQLite file at
-`~/.clawdchan/clawdchan.db` (or `$CLAWDCHAN_HOME/clawdchan.db`). Its
-tables are split by lifetime:
+SQLite file at `~/.clawdchan/clawdchan.db` (or `$CLAWDCHAN_HOME/clawdchan.db`).
+Everything is persistent: identity, peers, threads, envelopes, outbox.
+Threads are no longer wiped per CC session — Claude doesn't see them anyway.
 
-- **Persistent** — `identity` and `peers`. Identity is your Ed25519
-  keypair; peers are the contacts you've paired with. These survive
-  restarts.
-- **Ephemeral** — `threads`, `envelopes`, `outbox`. These are wiped
-  every time `clawdchan-mcp` starts. One MCP process = one Claude
-  Code session = a fresh thread list.
+## Listener lifecycle
 
-When Claude Code launches the MCP server, the node opens the store
-and immediately truncates the three ephemeral tables, preserving
-identity and pairings. When the CC session closes, the MCP process
-exits and any in-flight thread state is gone.
+Two processes can hold the relay link. Only one does at a time per node:
 
-Pairings persist because they're contacts — you don't want to
-re-pair with every peer every day. Threads don't, because they're
-the unit of conversation, and a fresh CC session should feel fresh.
-To resume a topic with a paired peer, open a new thread.
+- **`clawdchan daemon`** (recommended). Registers as `KindCLI`. Stays up
+  across CC sessions; fires OS notifications on inbound.
+- **`clawdchan-mcp`** (fallback). Registers as `KindMCP`. If no daemon is
+  present at MCP startup, the MCP server owns the relay link for the CC
+  session. If a daemon *is* present, MCP skips the relay connect and reads
+  from the shared store; it writes outbound to the outbox for the daemon to
+  drain.
 
-Crypto sessions (`core/session`) were always in-memory only.
-
-## Listener awareness
-
-A ClawdChan node only receives inbound messages while something is holding
-a relay link on its behalf. Two processes can do that:
-
-- **The MCP server itself** while your Claude Code session is open. It
-  connects to the relay on startup and drains any queued envelopes into
-  your local SQLite store.
-- **A persistent `clawdchan listen -follow`** running in a separate
-  terminal. This one keeps receiving messages even after Claude Code
-  closes.
-
-Both processes register themselves in `~/.clawdchan/listeners/<pid>.json`.
-Claude calls `clawdchan_session_status` (or reads the `setup` block from
-`clawdchan_toolkit`) to check whether you have a persistent listener and,
-if not, surfaces a nudge with the exact command to run. The setup warning
-is also attached to the responses of `clawdchan_pair`, `clawdchan_consume`,
-`clawdchan_open_thread`, and `clawdchan_send`, so you get the prompt the
-first time you engage ClawdChan in a session — not the next day after a
-peer has been trying to reach you.
-
-The slash command `/clawdchan` (from the plugin) explicitly instructs
-Claude to run this check and surface the result before doing anything
-else. If you want the prompt at the very top of every Claude Code session,
-run `/clawdchan` as your first message.
+`clawdchan_toolkit`'s `setup` block reports current state and includes a
+`user_message` field — if no daemon is present, Claude surfaces that message
+so the user knows to start one.
 
 ## Pending-asks pattern
 
-The Claude Code host is reactive. A remote `ask_human` does not interrupt
-an idle session; it is stored on receipt. On the next user turn, the
-agent should:
+A remote `ask_human` does not interrupt an idle session — it is stored on
+receipt. When the daemon fires a toast or the user next prompts Claude:
 
-1. Call `clawdchan_pending_asks` to see any asks.
-2. Present each to the user, verbatim.
-3. When the user answers: `clawdchan_submit_human_reply`.
-4. If the user explicitly declines: `clawdchan_decline_human`.
+1. Claude calls `clawdchan_inbox`.
+2. For each entry in `pending_asks`, Claude presents the question to the
+   user verbatim.
+3. When the user answers: `clawdchan_reply(peer_id, text)`.
+4. If the user declines: `clawdchan_decline(peer_id, reason?)`.
 
 The agent is structurally prevented from answering as the human: the
-envelope content is redacted from poll/wait responses until a
-`role=human` reply or an explicit decline is recorded on the thread. The
-`clawdchan_pending_asks` surface returns the content specifically so the
-agent can show it to the user, not answer it.
-
-For asynchronous wake-ups (the peer's agent asks something while your CC
-session is closed and you want a push on your phone), see the OpenClaw
-host in the [roadmap](roadmap.md).
+`pending_asks` field exists specifically so Claude can show the question to
+the user, not answer it. `clawdchan_reply` submits with `role=human`.
 
 ## Example prompts
 
-- *"Pair me with someone via ClawdChan."* → `clawdchan_pair` runs and prints
-  the mnemonic for the user to share.
+- *"Pair me with someone via ClawdChan."* → `clawdchan_pair` runs; share the
+  mnemonic.
 - *"Alice gave me this code: elder thunder high travel …"* →
-  `clawdchan_consume` with the mnemonic.
-- *"Does Alice's Claude expose a cache API on the auth module?"* → open a
-  thread, send an `ask`, poll until the reply arrives.
-- *"Is anyone waiting on me?"* → `clawdchan_pending_asks`.
+  `clawdchan_consume`.
+- *"Ask Alice's Claude about her auth module."* →
+  `clawdchan_message(peer_id=alice, intent=ask, text=...)`. Return to the
+  user. Reply surfaces on the next turn.
+- *"Anything new?"* → `clawdchan_inbox`.
+- *"Tell Alice: 'yes, use port 8443'"* → if Alice has a pending `ask_human`,
+  `clawdchan_reply(peer_id=alice, text="yes, use port 8443")`.

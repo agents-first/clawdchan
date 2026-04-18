@@ -1,10 +1,12 @@
 // Package claudecode is the Claude Code host binding for ClawdChan.
 //
 // It embeds the core as a library and exposes it to a Claude Code session as
-// an MCP server with tools for pair / consume / send / poll / etc. The host's
-// HumanSurface does not block on Ask — the remote peer's AskHuman envelope is
-// stored and surfaced to Claude via the clawdchan_pending_asks tool. Claude
-// then asks the user in-session and calls clawdchan_submit_human_reply.
+// a peer-centric MCP server (clawdchan_message / clawdchan_inbox /
+// clawdchan_reply / clawdchan_decline, plus pair/consume/peers/whoami). The
+// host's HumanSurface does not block on Ask — the remote peer's AskHuman
+// envelope is stored and surfaced to Claude via the pending_asks field of
+// clawdchan_inbox. Claude then asks the user in-session and calls
+// clawdchan_reply (or clawdchan_decline).
 package claudecode
 
 import (
@@ -21,13 +23,13 @@ import (
 type HumanSurface struct{}
 
 func (HumanSurface) Notify(context.Context, envelope.ThreadID, envelope.Envelope) error {
-	return nil // stored by the node; Claude surfaces via clawdchan_poll/pending
+	return nil // stored by the node; Claude surfaces via clawdchan_inbox
 }
 
 func (HumanSurface) Ask(context.Context, envelope.ThreadID, envelope.Envelope) (envelope.Content, error) {
 	// Return error so the node does not auto-reply. The envelope stays in
-	// the store; Claude picks it up via clawdchan_pending_asks and calls
-	// clawdchan_submit_human_reply once the user has answered in-session.
+	// the store; Claude picks it up via clawdchan_inbox and calls
+	// clawdchan_reply once the user has answered in-session.
 	return envelope.Content{}, errors.New("claudecode: AskHuman surfaces asynchronously via MCP tools")
 }
 
@@ -35,7 +37,7 @@ func (HumanSurface) Reachability() surface.Reachability { return surface.Reachab
 
 func (HumanSurface) PresentThread(context.Context, envelope.ThreadID) error { return nil }
 
-// AgentSurface is a no-op; Claude consumes envelopes via the clawdchan_poll
+// AgentSurface is a no-op; Claude consumes envelopes via the clawdchan_inbox
 // tool instead of a callback.
 type AgentSurface struct{}
 

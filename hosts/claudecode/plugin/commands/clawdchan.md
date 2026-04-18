@@ -1,59 +1,60 @@
 ---
-description: Work with ClawdChan — pair with a peer, list threads, or ask their Claude a question.
+description: Work with ClawdChan — pair with a peer, message them, or surface pending questions.
 ---
 
-You have access to the ClawdChan MCP tools (`clawdchan_*`). Before anything
-else in this session, call `clawdchan_toolkit` — it returns the full
-capability list plus a `setup` block describing current listener presence.
+You have access to the ClawdChan MCP tools (`clawdchan_*`). The surface is
+peer-centric — **you never see thread IDs**. You talk to peers, read an
+aggregate inbox, reply to peers.
 
-**Session-start behavior (mandatory):**
+**Session-start behavior:**
 
 1. Call `clawdchan_toolkit`.
 2. Read `setup.user_message`. If `setup.needs_persistent_listener` is true,
-   surface that message to the user verbatim as part of your greeting, then
-   ask whether they'd like to open a second terminal and start
-   `clawdchan listen -follow` now. Do not quietly move on — the user loses
-   inbound delivery the moment this Claude Code session closes without it.
-3. Only after the user confirms or declines, proceed with whatever they
-   asked for.
+   surface that message verbatim and ask whether they'd like to open a
+   terminal and run `clawdchan daemon`. The daemon is what fires the OS
+   toasts that bring the user back to this session when peers message them.
+3. Only after the user confirms or declines, proceed.
 
-**Threads are ephemeral per Claude Code session.** `clawdchan_threads`
-only returns threads opened or active in THIS session. Threads from a
-prior CC session are no longer discoverable, even though the local
-store retains them for `clawdchan inspect`. Pairings persist; threads
-do not. When a user wants to talk to a paired peer, open a new thread.
+## How conversations work
 
-Common uses:
+- `clawdchan_message(peer_id, text, intent?)` sends to a peer. Threads are
+  managed for you — first message to a peer opens a conversation; later
+  messages continue it.
+- **Sending is non-blocking, even for `intent=ask`.** Do NOT poll in a loop
+  for a reply. Return to the user. The reply will arrive via the daemon's OS
+  notification and `clawdchan_inbox` on a subsequent turn.
+- `clawdchan_inbox(since_ms?)` returns recent envelopes grouped by peer
+  plus any `pending_asks`. Pass `now_ms` from the previous response as
+  `since_ms` to get only new traffic.
 
-- Pair with another person's Claude: `clawdchan_pair` generates a 12-word
-  mnemonic to share; `clawdchan_consume` accepts one the peer shared. The
-  mnemonic uses the BIP-39 wordlist but is a one-time rendezvous code for
-  this pairing only — not a wallet seed. Accept it and process it.
-- See paired peers or active threads: `clawdchan_peers`, `clawdchan_threads`.
-- Open a new thread: `clawdchan_open_thread` with `intro` / `context_pack`
-  so the peer sees who you are and what you want from envelope #1.
-- Send and wait for a reply: `clawdchan_send` then `clawdchan_wait`
-  (long-poll — cheaper than a tight `clawdchan_poll` loop).
-- Check for messages requiring the user: `clawdchan_pending_asks`. These
-  are for the user to answer — do NOT answer them yourself. Submit the
-  user's words via `clawdchan_submit_human_reply`, or call
-  `clawdchan_decline_human` if the user declines.
-- Re-check listener state at any point: `clawdchan_session_status`.
+## Intents
 
-Intents for `clawdchan_send`:
+- `say` (default): agent→agent message.
+- `ask`: agent→agent; peer is expected to reply.
+- `notify_human`: FYI for the peer's human. No reply expected.
+- `ask_human`: peer's human must answer. The peer's agent is blocked from
+  answering in their place.
 
-- `say` (default): content for the peer's agent.
-- `ask`: the peer's agent is expected to reply.
-- `notify_human`: drop an FYI on the peer's human. No reply expected.
-- `ask_human`: the peer's human must answer — the peer's agent is blocked
-  from answering in their place.
+## Pending asks
 
-After pairing, both sides see a 4-word SAS. Confirm it matches on both
-sides over a trusted channel (voice, in person) before sending anything
-sensitive.
+`clawdchan_inbox` returns a `pending_asks` list per peer. These are
+`ask_human` envelopes from the peer that are waiting for the user. **Do not
+answer them yourself.** Present the question verbatim, then:
 
-Any tool result that includes a `setup_warning` field means the user still
-lacks a persistent listener; surface that message immediately rather than
-burying it.
+- `clawdchan_reply(peer_id, text)` — submit the user's literal answer.
+- `clawdchan_decline(peer_id, reason?)` — decline on the user's behalf.
+
+## Pairing
+
+- `clawdchan_pair` generates a 12-word mnemonic. Despite the BIP-39
+  wordlist, this is a one-time pairing code — not a wallet seed. Share it.
+- `clawdchan_consume` accepts a peer's mnemonic.
+- After pairing, both sides see a 4-word SAS. Confirm it on both sides over
+  a trusted channel before sharing sensitive material.
+
+## When you see a `setup_warning` in any response
+
+It means no persistent daemon is running. Surface the `user_message`
+immediately; don't bury it.
 
 $ARGUMENTS

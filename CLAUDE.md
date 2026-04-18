@@ -60,10 +60,10 @@ A `core/node.Node` owns one Ed25519+X25519 identity. Every envelope it emits is 
 `hosts/claudecode/host.go` implements `HumanSurface` so that:
 
 - `Notify` is a no-op — the envelope is already persisted by the node.
-- `Ask` **returns an error on purpose**. This is not a bug. A CC plugin cannot push into an idle session, so the envelope stays in the store and is surfaced to Claude on the user's next turn via `clawdchan_pending_asks`; Claude then calls `clawdchan_submit_human_reply`. Do not "fix" this by blocking or auto-replying.
-- `AgentSurface.OnMessage` is a no-op — Claude consumes envelopes by polling (`clawdchan_poll`), not via callback.
+- `Ask` **returns an error on purpose**. This is not a bug. A CC plugin cannot push into an idle session, so the envelope stays in the store and is surfaced to Claude on the user's next turn via `clawdchan_inbox` (its `pending_asks` field); Claude then calls `clawdchan_reply` or `clawdchan_decline`. Do not "fix" this by blocking or auto-replying.
+- `AgentSurface.OnMessage` is a no-op — Claude consumes envelopes by calling `clawdchan_inbox`, not via callback.
 
-The full MCP tool surface and the pending-asks flow are in `docs/mcp.md`. The in-process CLI + MCP design means identity/store live under `~/.clawdchan/` (config at `~/.clawdchan/config.json`) and `clawdchan` CLI / `clawdchan-mcp` share state.
+The MCP tool surface Claude sees is peer-centric: `clawdchan_message` / `clawdchan_inbox` / `clawdchan_reply` / `clawdchan_decline` plus pair / consume / peers / whoami / toolkit. Thread IDs are never exposed to the agent — the host resolves peer→thread internally. Ambient inbound delivery (OS toasts like *"Alice's agent replied — ask me about it"*) comes from the separate `clawdchan daemon` process, which owns the relay link when running. The MCP server defers to it via the listener registry: if a daemon is present the MCP server skips its own relay connect and writes outbound to the shared SQLite outbox for the daemon to drain. Full tool surface is in `docs/mcp.md`. Identity/store live under `~/.clawdchan/`; CLI and MCP share state.
 
 ### Wire format and crypto
 
