@@ -35,6 +35,12 @@ type Config struct {
 	Agent surface.AgentSurface
 	// Policy gates inbound envelopes. nil defaults to policy.Default().
 	Policy policy.Engine
+	// Ephemeral, when true, wipes any persisted threads / envelopes /
+	// outbox at node startup. Identity and pairings are preserved. Intended
+	// for hosts (e.g. clawdchan-mcp) whose unit of persistence is a single
+	// Claude Code session: each fresh MCP process begins with an empty
+	// thread list.
+	Ephemeral bool
 }
 
 // Node is the public entry point for host bindings and the CLI.
@@ -94,6 +100,12 @@ func New(cfg Config) (*Node, error) {
 	} else if err != nil {
 		st.Close()
 		return nil, err
+	}
+	if cfg.Ephemeral {
+		if err := st.PurgeConversations(ctx); err != nil {
+			st.Close()
+			return nil, fmt.Errorf("node: purge on ephemeral boot: %w", err)
+		}
 	}
 	n := &Node{
 		cfg:       cfg,

@@ -42,11 +42,12 @@ func main() {
 	}
 
 	n, err := node.New(node.Config{
-		DataDir:  cfg.DataDir,
-		RelayURL: cfg.RelayURL,
-		Alias:    cfg.Alias,
-		Human:    claudecode.HumanSurface{},
-		Agent:    claudecode.AgentSurface{},
+		DataDir:   cfg.DataDir,
+		RelayURL:  cfg.RelayURL,
+		Alias:     cfg.Alias,
+		Human:     claudecode.HumanSurface{},
+		Agent:     claudecode.AgentSurface{},
+		Ephemeral: true, // one MCP process = one Claude Code session = fresh threads
 	})
 	if err != nil {
 		log.Fatalf("clawdchan-mcp: new node: %v", err)

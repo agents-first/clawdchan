@@ -82,6 +82,31 @@ session startup; a new server will not appear mid-session.
 - `handoff`: yield the turn; the next envelope on the thread must be
   `role=human`.
 
+## Where state lives
+
+The ClawdChan node keeps a single SQLite file at
+`~/.clawdchan/clawdchan.db` (or `$CLAWDCHAN_HOME/clawdchan.db`). Its
+tables are split by lifetime:
+
+- **Persistent** — `identity` and `peers`. Identity is your Ed25519
+  keypair; peers are the contacts you've paired with. These survive
+  restarts.
+- **Ephemeral** — `threads`, `envelopes`, `outbox`. These are wiped
+  every time `clawdchan-mcp` starts. One MCP process = one Claude
+  Code session = a fresh thread list.
+
+When Claude Code launches the MCP server, the node opens the store
+and immediately truncates the three ephemeral tables, preserving
+identity and pairings. When the CC session closes, the MCP process
+exits and any in-flight thread state is gone.
+
+Pairings persist because they're contacts — you don't want to
+re-pair with every peer every day. Threads don't, because they're
+the unit of conversation, and a fresh CC session should feel fresh.
+To resume a topic with a paired peer, open a new thread.
+
+Crypto sessions (`core/session`) were always in-memory only.
+
 ## Listener awareness
 
 A ClawdChan node only receives inbound messages while something is holding
