@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/vMaroon/ClawdChan/core/notify"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
@@ -18,6 +23,122 @@ import (
 const launchdLabel = "com.vmaroon.clawdchan.daemon"
 const systemdUnit = "clawdchan-daemon.service"
 const windowsTaskName = "ClawdChan Daemon"
+
+// --- setup (interactive) ---------------------------------------------------
+
+// daemonSetup is the friendly entry point called by `make install`: it
+// explains what the daemon is, where it gets installed, and prompts the user
+// before doing anything. Skipped cleanly when ClawdChan isn't initialized
+// yet, when the daemon is already installed, or when stdin isn't a TTY (so
+// unattended `make install` doesn't silently register a system service).
+func daemonSetup(args []string) error {
+	fs := flag.NewFlagSet("daemon setup", flag.ExitOnError)
+	yes := fs.Bool("y", false, "assume yes (non-interactive)")
+	fs.Parse(args)
+
+	if _, err := loadConfig(); err != nil {
+		fmt.Println("ClawdChan is not initialized yet — run `clawdchan init` first, then rerun `make install` to set up the daemon.")
+		return nil
+	}
+
+	if daemonAlreadyInstalled() {
+		fmt.Println("ClawdChan daemon is already installed. Skipping setup.")
+		fmt.Println("(Remove with `clawdchan daemon uninstall`, check state with `clawdchan daemon status`.)")
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("ClawdChan daemon — install as a background service?")
+	fmt.Println()
+	fmt.Println("The daemon holds a persistent relay link for your node so peers can")
+	fmt.Println("reach you even when no Claude Code session is open. When a peer")
+	fmt.Println("messages you, it fires a native OS notification like")
+	fmt.Println(`  "Alice's agent replied — ask me to continue."`)
+	fmt.Println("and you resume by saying anything to Claude.")
+	fmt.Println()
+	switch runtime.GOOS {
+	case "darwin":
+		fmt.Println("This will:")
+		fmt.Println("  - write ~/Library/LaunchAgents/" + launchdLabel + ".plist")
+		fmt.Println("  - start the daemon under launchd (auto-starts at each login)")
+		fmt.Println("  - log to ~/Library/Logs/clawdchan-daemon.log")
+		fmt.Println("  - fire a test notification (macOS may ask you to allow osascript)")
+	case "linux":
+		fmt.Println("This will:")
+		fmt.Println("  - write ~/.config/systemd/user/" + systemdUnit)
+		fmt.Println("  - run `systemctl --user enable --now " + systemdUnit + "`")
+		fmt.Println("  - auto-start at login; logs via `journalctl --user -u " + systemdUnit + "`")
+	case "windows":
+		fmt.Println("This will:")
+		fmt.Println("  - create a Scheduled Task \"" + windowsTaskName + "\" (no admin needed)")
+		fmt.Println("  - trigger at each user logon under your account")
+		fmt.Println("  - start the daemon now")
+	default:
+		fmt.Println("This platform does not support automatic install — skipping.")
+		return nil
+	}
+	fmt.Println()
+	fmt.Println("Remove any time with `clawdchan daemon uninstall`.")
+	fmt.Println()
+
+	if !*yes {
+		ok, err := promptYN("Install the daemon now? [Y/n]: ", true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println("Skipped. Run `clawdchan daemon install` any time.")
+			return nil
+		}
+	}
+
+	return daemonInstall(nil)
+}
+
+// daemonAlreadyInstalled reports whether the platform-native service file
+// for the daemon already exists. Used by setup to stay idempotent under
+// repeated `make install` runs.
+func daemonAlreadyInstalled() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		return fileExists(filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist"))
+	case "linux":
+		home, _ := os.UserHomeDir()
+		return fileExists(filepath.Join(home, ".config", "systemd", "user", systemdUnit))
+	case "windows":
+		return exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run() == nil
+	}
+	return false
+}
+
+// promptYN reads a Y/n answer from stdin. Returns defaultYes on EOF, empty
+// input, or when stdin is not a terminal (so non-interactive `make install`
+// from a CI harness silently skips rather than guessing).
+func promptYN(prompt string, defaultYes bool) (bool, error) {
+	if !stdinIsTTY() {
+		fmt.Println("(non-interactive session — skipping daemon install. Run `clawdchan daemon install` to add it manually.)")
+		return false, nil
+	}
+	fmt.Print(prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return defaultYes, nil
+		}
+		return false, err
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	if ans == "" {
+		return defaultYes, nil
+	}
+	return ans == "y" || ans == "yes", nil
+}
+
+func stdinIsTTY() bool {
+	fd := os.Stdin.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
 
 // --- install ---------------------------------------------------------------
 

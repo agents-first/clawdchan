@@ -25,7 +25,8 @@ import (
 //
 //	clawdchan daemon              # foreground run (alias for `run`)
 //	clawdchan daemon run          # foreground run
-//	clawdchan daemon install      # install as a LaunchAgent (darwin) / user systemd unit (linux) and start
+//	clawdchan daemon setup        # interactive: explain + prompt [Y/n], then install
+//	clawdchan daemon install      # non-interactive install
 //	clawdchan daemon uninstall    # stop and remove
 //	clawdchan daemon status       # report install + running state
 //
@@ -42,6 +43,8 @@ func cmdDaemon(args []string) error {
 	switch sub {
 	case "run":
 		return daemonRun(rest)
+	case "setup":
+		return daemonSetup(rest)
 	case "install":
 		return daemonInstall(rest)
 	case "uninstall", "remove":
@@ -49,7 +52,7 @@ func cmdDaemon(args []string) error {
 	case "status":
 		return daemonStatus(rest)
 	default:
-		return fmt.Errorf("unknown daemon subcommand %q (use run|install|uninstall|status)", sub)
+		return fmt.Errorf("unknown daemon subcommand %q (use run|setup|install|uninstall|status)", sub)
 	}
 }
 

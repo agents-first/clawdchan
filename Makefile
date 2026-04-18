@@ -44,6 +44,7 @@ install:
 	    echo "  [ok] clawdchan resolves on PATH"; \
 	    echo "  Running: clawdchan doctor"; \
 	    clawdchan doctor || true; \
+	    clawdchan daemon setup || true; \
 	  else \
 	    echo "  [warn] clawdchan is not on your PATH."; \
 	    echo "  Claude Code launches clawdchan-mcp via its 'command' string; bare names must resolve on PATH."; \
