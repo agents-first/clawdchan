@@ -30,6 +30,22 @@ tidy:
 
 install:
 	go install ./cmd/clawdchan ./cmd/clawdchan-relay ./cmd/clawdchan-mcp
+	@GOBIN="$$(go env GOBIN)"; if [ -z "$$GOBIN" ]; then GOBIN="$$(go env GOPATH)/bin"; fi; \
+	  echo "Installed binaries to $$GOBIN"; \
+	  case ":$$PATH:" in \
+	    *":$$GOBIN:"*) \
+	      echo "  $$GOBIN is on your PATH. ✓"; \
+	      echo "  Running: clawdchan doctor"; \
+	      "$$GOBIN/clawdchan" doctor || true; \
+	      ;; \
+	    *) \
+	      echo "  WARNING: $$GOBIN is not on your PATH."; \
+	      echo "  Claude Code launches clawdchan-mcp via its 'command' string; bare names must resolve on PATH."; \
+	      echo "  Add to your shell profile:"; \
+	      echo "    export PATH=\"$$GOBIN:\$$PATH\""; \
+	      echo "  Or wire an absolute path into .mcp.json: clawdchan init -write-mcp <dir>"; \
+	      ;; \
+	  esac
 
 run-relay:
 	go run ./cmd/clawdchan-relay -addr :8787

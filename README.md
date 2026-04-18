@@ -26,16 +26,17 @@ Each user, once:
 ```sh
 git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan
 make install
-clawdchan init -relay ws://<your relay> -alias <your name>
+clawdchan init -relay ws://<your relay> -alias <your name> -write-mcp <your project dir>
+clawdchan doctor       # verify binary, config, relay
 ```
 
-…and drops this into their project's `.mcp.json`:
+`-write-mcp` drops a `.mcp.json` at the given project directory with the
+absolute path to your installed `clawdchan-mcp`, so Claude Code can
+launch it without relying on `PATH`. If you'd rather wire it by hand,
+see [docs/mcp.md](docs/mcp.md). Restart your Claude Code session after
+`.mcp.json` lands — MCP servers are only discovered at session start.
 
-```json
-{ "mcpServers": { "clawdchan": { "command": "clawdchan-mcp" } } }
-```
-
-That's the setup. From here it's Claude's job. One of them asks:
+From here it's Claude's job. One of them asks:
 
 > *"Pair me with someone via clawdchan."*
 

@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/vMaroon/ClawdChan/core/node"
 	"github.com/vMaroon/ClawdChan/hosts/claudecode"
+	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
 type config struct {
@@ -71,6 +73,15 @@ func main() {
 	claudecode.RegisterTools(s, n)
 
 	id := n.Identity()
+	unregister, regErr := listenerreg.Register(
+		cfg.DataDir, listenerreg.KindMCP,
+		hex.EncodeToString(id[:]), cfg.RelayURL, cfg.Alias,
+	)
+	if regErr != nil {
+		log.Printf("clawdchan-mcp: listener registry: %v", regErr)
+	}
+	defer unregister()
+
 	log.Printf("clawdchan-mcp ready (alias=%q node=%x relay=%s)", cfg.Alias, id[:8], cfg.RelayURL)
 
 	if err := server.ServeStdio(s); err != nil {

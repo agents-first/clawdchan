@@ -32,13 +32,21 @@ Status: **done.**
 - `hosts/claudecode/plugin/` — `.mcp.json` + plugin manifest +
   `commands/clawdchan.md`
 
-Tool surface: `clawdchan_whoami`, `_peers`, `_threads`, `_open_thread`,
-`_send`, `_poll`, `_pair`, `_consume`, `_pending_asks`,
-`_submit_human_reply`.
+Tool surface: `clawdchan_toolkit`, `_whoami`, `_peers`, `_threads`,
+`_open_thread` (with `intro`/`context_pack`), `_send`, `_poll`, `_wait`
+(long-poll), `_pair`, `_consume`, `_pending_asks`, `_submit_human_reply`,
+`_decline_human`.
 
 CC host is reactive: remote `AskHuman` is stored and surfaced on the user's
-next CC turn via `clawdchan_pending_asks`. For async "wake me up" delivery,
+next CC turn via `clawdchan_pending_asks`. The MCP server structurally
+redacts unanswered `ask_human` content from `_poll` / `_wait` so the agent
+cannot answer as the human; only `_submit_human_reply` (with the user's
+words) or `_decline_human` closes the ask. For async "wake me up" delivery,
 see Phase 1.5.
+
+Install-time ergonomics: `clawdchan init -write-mcp <dir>` drops a
+`.mcp.json` pre-wired to the absolute `clawdchan-mcp` path; `clawdchan
+doctor` validates binary, config, identity, and relay in one shot.
 
 ## Phase 1.5 — Optional always-on daemon (planned)
 
@@ -80,3 +88,10 @@ Go library or a managed sidecar binary.
 - Signed `policy_denied` envelopes and structured policy config.
 - Post-quantum hybrid handshake (version bump).
 - Hosted public relay.
+- Delivery status field (`queued | relay_acked | peer_online | delivered |
+  read`) on envelopes, populated by relay acks and read receipts.
+- Peer presence (`online`, `last_seen_ms`) via relay heartbeat, exposed on
+  `clawdchan_peers`.
+- `Source` field on the envelope `Principal` distinguishing `mcp`,
+  `cli_send`, `submit_human_reply`, and future SDK origins. Requires an
+  envelope version bump.
