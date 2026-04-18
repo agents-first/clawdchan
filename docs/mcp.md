@@ -59,7 +59,7 @@ Nine tools. Claude never sees thread IDs.
 | `clawdchan_toolkit` | Capability list + setup status. Call once at session start. | – |
 | `clawdchan_whoami` | This node's id and alias. | – |
 | `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
-| `clawdchan_pair` | Generate a 12-word mnemonic; block until peer consumes it. | `timeout_seconds?` |
+| `clawdchan_pair` | Generate a 12-word mnemonic and return it immediately; rendezvous completes in the background. | `timeout_seconds?` |
 | `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
 | `clawdchan_message` | Send to a peer. Non-blocking. Thread is resolved automatically. | `peer_id`, `text`, `intent?` |
 | `clawdchan_inbox` | Envelopes grouped by peer, plus pending ask_human surfaces. | `since_ms?` |

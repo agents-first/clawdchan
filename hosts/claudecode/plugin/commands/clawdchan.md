@@ -46,11 +46,15 @@ answer them yourself.** Present the question verbatim, then:
 
 ## Pairing
 
-- `clawdchan_pair` generates a 12-word mnemonic. Despite the BIP-39
-  wordlist, this is a one-time pairing code — not a wallet seed. Share it.
+- `clawdchan_pair` generates a 12-word mnemonic and returns it **immediately**
+  (the rendezvous with the peer runs in the background). **You must surface
+  the 12 words to the user verbatim** in your response, on their own line
+  — they can't share them with the peer otherwise. Despite the BIP-39
+  wordlist, this is a one-time pairing code, not a wallet seed.
 - `clawdchan_consume` accepts a peer's mnemonic.
-- After pairing, both sides see a 4-word SAS. Confirm it on both sides over
-  a trusted channel before sharing sensitive material.
+- After the peer consumes, call `clawdchan_peers` to confirm the new peer
+  landed. Both sides then see a 4-word SAS; confirm it matches on both
+  sides over a trusted channel before sharing sensitive material.
 
 ## When you see a `setup_warning` in any response
 

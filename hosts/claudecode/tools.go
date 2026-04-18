@@ -64,7 +64,7 @@ func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 			"tools": []map[string]any{
 				{"name": "clawdchan_whoami", "summary": "This node's id and alias."},
 				{"name": "clawdchan_peers", "summary": "Paired peers, with pending-ask and last-activity info per peer."},
-				{"name": "clawdchan_pair", "summary": "Generate a pairing mnemonic and block until the peer consumes it."},
+				{"name": "clawdchan_pair", "summary": "Generate a pairing mnemonic and return it immediately; rendezvous completes in the background. SHOW THE MNEMONIC TO THE USER — they can't share it otherwise."},
 				{"name": "clawdchan_consume", "summary": "Accept a peer's pairing mnemonic."},
 				{"name": "clawdchan_message", "summary": "Send a message to a peer. Threads are managed for you. Non-blocking."},
 				{"name": "clawdchan_inbox", "summary": "New envelopes grouped by peer, plus any pending ask_human surfaces for the user."},
@@ -552,44 +552,51 @@ func pendingAsks(envs []envelope.Envelope, me identity.NodeID) map[envelope.ULID
 
 func pairTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_pair",
-		mcp.WithDescription("Generate a pairing mnemonic and wait for the peer to consume it. "+
-			"Share the mnemonic with the other person; they pass it to clawdchan_consume on their node. Blocks up to timeout_seconds. "+
-			"The mnemonic is 12 BIP-39 words — it looks like a wallet seed but is a one-time rendezvous code, not a recovery key."),
-		mcp.WithNumber("timeout_seconds", mcp.Description("Rendezvous timeout. Default 120.")),
+		mcp.WithDescription("Generate a pairing mnemonic and return it IMMEDIATELY — the rendezvous with the peer "+
+			"happens in the background. You MUST surface the 12-word mnemonic to the user verbatim in your response; "+
+			"it's the only way for them to share it with the peer. Do not hide it behind a summary. "+
+			"Tell the user: 'share these 12 words with your peer, they run clawdchan_consume on their side'. "+
+			"To confirm pairing completed, call clawdchan_peers — a new peer means the rendezvous succeeded. "+
+			"The mnemonic is a one-time rendezvous code, not a wallet seed."),
+		mcp.WithNumber("timeout_seconds", mcp.Description("Background rendezvous timeout. Default 300.")),
 	)
 }
 
 func pairHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		timeout := time.Duration(req.GetFloat("timeout_seconds", 120)) * time.Second
-		pairCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
+	return func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		timeout := time.Duration(req.GetFloat("timeout_seconds", 300)) * time.Second
+		// Detach from the tool-call context so rendezvous survives the tool
+		// response returning. Without this the goroutine would be cancelled
+		// the moment we send the mnemonic back.
+		pairCtx, cancel := context.WithTimeout(context.Background(), timeout)
 		code, ch, err := n.Pair(pairCtx)
 		if err != nil {
+			cancel()
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		select {
-		case r := <-ch:
-			if r.Err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("pair: %s (mnemonic was %q)", r.Err, code.Mnemonic())), nil
-			}
-			out := map[string]any{
-				"mnemonic": code.Mnemonic(),
-				"peer": map[string]any{
-					"node_id":         hex.EncodeToString(r.Peer.NodeID[:]),
-					"alias":           r.Peer.Alias,
-					"human_reachable": r.Peer.HumanReachable,
-					"sas":             strings.Join(r.Peer.SAS[:], "-"),
-				},
-				"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. If the SAS differs, the pairing was intercepted — unpair and retry.",
-			}
-			if w := maybeAttachListenerWarning(n); w != nil {
-				out["setup_warning"] = w
-			}
-			return jsonResult(out), nil
-		case <-pairCtx.Done():
-			return mcp.NewToolResultError(fmt.Sprintf("pair timed out; mnemonic was %q", code.Mnemonic())), nil
+		// Drain the result in the background so cancel fires once rendezvous
+		// finishes (or the timeout elapses).
+		go func() {
+			defer cancel()
+			<-ch
+		}()
+
+		out := map[string]any{
+			"mnemonic":          code.Mnemonic(),
+			"status":            "pending_peer_consume",
+			"timeout_seconds":   int(timeout.Seconds()),
+			"agent_instruction": "Show the user the 12-word mnemonic verbatim in your response, on its own line, so they can copy-paste it. Then tell them: 'Share these 12 words with your peer; they run clawdchan_consume on their side. Call clawdchan_peers after a minute or so to confirm the new peer landed.'",
+			"next_steps_for_user": []string{
+				"Share the 12-word mnemonic with the other person (voice, signal, any trusted channel).",
+				"They run clawdchan_consume on their node with the same words.",
+				"Once they do, their node will appear in clawdchan_peers here.",
+			},
+			"security_note": "Mnemonics look like BIP-39 wallet seeds but are one-time rendezvous codes, safe to share on the channel you're pairing over. Still: after pairing, confirm the 4-word SAS matches on both sides via clawdchan_peers before sharing sensitive material.",
 		}
+		if w := maybeAttachListenerWarning(n); w != nil {
+			out["setup_warning"] = w
+		}
+		return jsonResult(out), nil
 	}
 }
 
