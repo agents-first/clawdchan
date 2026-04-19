@@ -46,9 +46,24 @@ import (
 )
 
 type config struct {
-	DataDir  string `json:"data_dir"`
-	RelayURL string `json:"relay_url"`
-	Alias    string `json:"alias"`
+	DataDir  string          `json:"data_dir"`
+	RelayURL string          `json:"relay_url"`
+	Alias    string          `json:"alias"`
+	Dispatch *dispatchConfig `json:"agent_dispatch,omitempty"`
+}
+
+// dispatchConfig controls the daemon's agent-cadence collab path. When
+// enabled and a peer sends an envelope marked Content.Title="clawdchan:
+// collab_sync", the daemon spawns Command with the ask on stdin and routes
+// the subprocess's JSON answer back as a normal envelope instead of
+// waiting for the human's next Claude Code turn. See
+// core/policy/dispatch.go for the wire contract.
+type dispatchConfig struct {
+	Enabled         bool     `json:"enabled,omitempty"`
+	Command         []string `json:"command,omitempty"`
+	TimeoutSeconds  int      `json:"timeout_seconds,omitempty"`
+	MaxContext      int      `json:"max_thread_context,omitempty"`
+	MaxCollabRounds int      `json:"max_collab_rounds,omitempty"`
 
 	// OpenClaw fields are optional. When OpenClawURL is empty, the daemon
 	// runs in its default CC-only mode. When set, the daemon connects to the

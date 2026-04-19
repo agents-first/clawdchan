@@ -52,20 +52,45 @@ Manual:
 
 ## Tool surface
 
-Nine tools. Claude never sees thread IDs.
+Claude never sees thread IDs.
 
 | Tool | Purpose | Args |
 |---|---|---|
 | `clawdchan_toolkit` | Capability list + setup status. Call once at session start. | – |
 | `clawdchan_whoami` | This node's id and alias. | – |
 | `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
-| `clawdchan_pair` | Generate a 12-word mnemonic and return it immediately; rendezvous completes in the background. | `timeout_seconds?` |
+| `clawdchan_pair` | Generate a 12-word mnemonic; rendezvous completes in the background. | `timeout_seconds?` |
 | `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
-| `clawdchan_message` | Send to a peer. Non-blocking. Thread is resolved automatically. | `peer_id`, `text`, `intent?` |
-| `clawdchan_inbox` | Envelopes grouped by peer, plus pending ask_human surfaces. | `since_ms?` |
-| `clawdchan_await` | Short blocking wait (≤60s) for the next inbound from a peer. Primitive for live collab loops; use from a Task sub-agent. | `peer_id`, `timeout_seconds?`, `since_ms?` |
-| `clawdchan_reply` | Submit the user's literal answer to the peer's latest pending ask_human. | `peer_id`, `text` |
-| `clawdchan_decline` | Decline the peer's pending ask_human. | `peer_id`, `reason?` |
+| `clawdchan_message` | Send to a peer. Non-blocking. | `peer_id`, `text`, `intent?`, `collab?` |
+| `clawdchan_inbox` | Envelopes per peer with `direction` and `collab` flags; pending ask_human surfaces; optional long-poll. | `since_ms?`, `wait_seconds?`, `include?`, `notes_seen?` |
+| `clawdchan_subagent_await` | Short blocking wait (≤60s) for next inbound from a peer. Sub-agent tool only. | `peer_id`, `timeout_seconds?`, `since_ms?` |
+| `clawdchan_reply` | Submit the user's literal answer to a pending ask_human. | `peer_id`, `text` |
+| `clawdchan_decline` | Decline a pending ask_human. | `peer_id`, `reason?` |
+| `clawdchan_peer_rename` / `_revoke` / `_remove` | Manage paired peers by hex / prefix / alias. | – |
+
+Every envelope Claude sees carries two server-derived fields:
+
+- `direction` — `"in"` for envelopes from the peer, `"out"` for
+  envelopes this node sent (whether by you or, if the user has
+  agent-dispatch configured, by the dispatcher subprocess).
+- `collab` — `true` when the envelope is part of a live agent-to-agent
+  exchange (wire-level `Content.Title == "clawdchan:collab_sync"`).
+
+No hex compare, no title pattern-match needed.
+
+### Long-poll and headers-only inbox
+
+`clawdchan_inbox` accepts three optional modes:
+
+- `wait_seconds` (0–15) — blocks server-side until anything newer than
+  `since_ms` exists, or the timeout elapses. Cheap alternative to
+  sleep-and-poll from the main agent. Use between user turns; use
+  `clawdchan_subagent_await` from a sub-agent for tight live loops.
+- `include=headers` — drops content bodies. Keeps `envelope_id`,
+  `direction`, `collab`, `intent`, timestamps. Cheap polling over long
+  threads.
+- `notes_seen=true` — drops the usage-notes field once the agent has
+  internalized the pattern.
 
 ### Intents (for `clawdchan_message`)
 
@@ -79,7 +104,7 @@ Nine tools. Claude never sees thread IDs.
 ## UX model
 
 Claude Code has no server-push. The agent can't interrupt an idle session.
-Four modes follow from that constraint:
+Five modes follow from that constraint:
 
 - **Send and forget (default).** `clawdchan_message(intent=ask)` returns
   immediately. Main Claude tells the user "sent — I'll surface the reply
@@ -91,14 +116,77 @@ Four modes follow from that constraint:
   - `"Alice is waiting on your answer — ask me about it."` (ask_human)
   The user types anything to Claude; Claude calls `clawdchan_inbox` and
   resumes.
+- **Gentle wait (main agent).** `clawdchan_inbox(wait_seconds=15)`
+  blocks server-side for up to 15s. Use after a send when the peer is
+  likely online; cheaper than a toast-bounce and keeps the agent's
+  turn live without burning cache on sleep-poll loops.
 - **Active collab (sub-agent).** When the user explicitly signals live
   collaboration — "iterate with her agent until you converge" — main Claude
   delegates the loop to a Task sub-agent. The sub-agent runs
-  `clawdchan_message` + `clawdchan_await` in a tight loop with 10s timeouts
-  until convergence, silence, or a max-round cap. Main Claude stays
-  responsive to the user; the sub-agent returns a summary when done.
-- **Main agent never blocks.** Even if Claude wants a reply fast, it does
-  not poll from its own turn. `clawdchan_await` is a sub-agent tool.
+  `clawdchan_message(collab=true)` + `clawdchan_subagent_await` in a tight loop
+  with 10s timeouts until convergence, silence, or a max-round cap. Main
+  Claude stays responsive to the user; the sub-agent returns a summary
+  when done.
+- **Agent-cadence dispatch (daemon side).** If the peer's user has
+  configured `agent_dispatch.command` in their `~/.clawdchan/config.json`,
+  their daemon answers your `collab=true` asks automatically by
+  spawning a configured subprocess. Replies land via the normal inbox
+  path, tagged `direction=out` (because they came from the peer's node
+  without the peer's human involvement). For senders this is
+  transparent — same tool surface, faster cadence.
+- **Main agent never blocks for long.** `clawdchan_subagent_await` is a
+  sub-agent tool; `clawdchan_inbox(wait_seconds=...)` caps at 15s.
+  Anything longer should delegate to a Task.
+
+### Agent-cadence dispatch (receiver config)
+
+To opt into the receiver side of the dispatch path, edit
+`~/.clawdchan/config.json` and add an `agent_dispatch` block:
+
+```json
+{
+  "data_dir": "...",
+  "relay_url": "...",
+  "alias": "...",
+  "agent_dispatch": {
+    "enabled": true,
+    "command": ["/usr/local/bin/clawdchan-dispatch-agent"],
+    "timeout_seconds": 120,
+    "max_thread_context": 20,
+    "max_collab_rounds": 12
+  }
+}
+```
+
+The daemon spawns `command` for each incoming `collab=true` ask, writes
+a JSON `DispatchRequest` on stdin, and expects one line of JSON on
+stdout:
+
+```
+// request (partial — see core/policy/dispatch.go DispatchRequest for the full shape)
+{
+  "version": 1,
+  "ask":           { ... the incoming envelope ... },
+  "thread_context":[ ... recent envelopes on the thread ... ],
+  "peer":          { "node_id", "alias", "trust", "human_reachable" },
+  "self":          { "node_id", "alias" },
+  "policy":        { "collab_rounds": N, "max_collab_rounds": 12 }
+}
+
+// response
+{ "answer": "...", "intent": "ask|say", "collab": true|false }
+// OR
+{ "declined": "reason the peer will see" }
+```
+
+Exit code 0 with an empty stdout, malformed JSON, and a timeout are all
+treated as declines. On decline, the daemon sends a
+`[collab-dispatch declined] <reason>` reply on the thread so the sender's
+sub-agent can exit its loop cleanly, and falls back to firing the usual
+OS notification so the user learns something happened. Max collab
+rounds is a hop ceiling: if the thread has more than
+`max_collab_rounds` collab-sync envelopes in its history, the daemon
+refuses to dispatch without even spawning the subprocess.
 
 ## Where state lives
 

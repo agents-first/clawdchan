@@ -16,6 +16,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/vMaroon/ClawdChan/core/policy"
 	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
@@ -28,8 +29,16 @@ import (
 // to" — and matches the UX the daemon enforces: toasts like "Alice's agent
 // replied — ask me about it" bring the user back to the Claude Code session,
 // where the agent resumes naturally from inbox state.
-func RegisterTools(s *server.MCPServer, n *node.Node) {
-	s.AddTool(toolkitTool(), toolkitHandler(n))
+//
+// opts tune what the toolkit tool reports back — notably whether the local
+// node has agent-dispatch configured, which the agent wants to know so it
+// can set expectations about cadence.
+func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
+	cfg := regOpts{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	s.AddTool(toolkitTool(), toolkitHandler(n, &cfg))
 	s.AddTool(whoamiTool(), whoamiHandler(n))
 	s.AddTool(peersTool(), peersHandler(n))
 	s.AddTool(pairTool(), pairHandler(n))
@@ -44,6 +53,25 @@ func RegisterTools(s *server.MCPServer, n *node.Node) {
 	s.AddTool(peerRemoveTool(), peerRemoveHandler(n))
 }
 
+// Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
+// it's a variadic slot now so callers don't break when we add more.
+type Option func(*regOpts)
+
+type regOpts struct {
+	dispatchEnabled bool
+}
+
+// WithDispatchEnabled tells the toolkit to report that the local daemon
+// has agent-dispatch configured. The MCP binary reads this from the same
+// config.json the daemon reads. When enabled, incoming collab=true asks
+// will be auto-answered by the configured subprocess — the agent can set
+// its expectations about conversation cadence accordingly, and knows
+// that some outbound envelopes it finds in its own inbox may have been
+// dispatcher-produced rather than sent by this session's agent.
+func WithDispatchEnabled(enabled bool) Option {
+	return func(o *regOpts) { o.dispatchEnabled = enabled }
+}
+
 // --- toolkit ----------------------------------------------------------------
 
 func toolkitTool() mcp.Tool {
@@ -53,50 +81,49 @@ func toolkitTool() mcp.Tool {
 	)
 }
 
-func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
+func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		id := n.Identity()
 		setup := buildSetupStatus(n)
+
+		// Dispatch awareness. When the local daemon has agent-dispatch
+		// configured, inbound collab=true asks are auto-answered by a
+		// subprocess rather than waiting for the human — and that fact
+		// shapes how the agent should describe cadence and attribute
+		// outbound envelopes it didn't itself send this session.
+		dispatch := map[string]any{"enabled": opts != nil && opts.dispatchEnabled}
+		if opts != nil && opts.dispatchEnabled {
+			dispatch["note"] = "Incoming collab=true asks are auto-answered at agent speed by a local subprocess. If you see direction=out collab=true envelopes in a thread that you don't remember sending this session, your dispatcher handled them while the user was away — describe them that way, not as something you said."
+		}
+
 		return jsonResult(map[string]any{
-			"version": "0.2",
+			"version": "0.3",
 			"self": map[string]any{
 				"node_id": hex.EncodeToString(id[:]),
 				"alias":   n.Alias(),
 				"relay":   n.RelayURL(),
 			},
-			"setup": setup,
-			"tools": []map[string]any{
-				{"name": "clawdchan_whoami", "summary": "This node's id and alias."},
-				{"name": "clawdchan_peers", "summary": "Paired peers, with pending-ask and last-activity info per peer."},
-				{"name": "clawdchan_pair", "summary": "Generate a pairing mnemonic and return it immediately; rendezvous completes in the background. SHOW THE MNEMONIC TO THE USER — they can't share it otherwise."},
-				{"name": "clawdchan_consume", "summary": "Accept a peer's pairing mnemonic."},
-				{"name": "clawdchan_message", "summary": "Send a message to a peer. Threads are managed for you. Non-blocking."},
-				{"name": "clawdchan_inbox", "summary": "New envelopes grouped by peer, plus any pending ask_human surfaces for the user."},
-				{"name": "clawdchan_await", "summary": "Short blocking wait (≤60s) for the next inbound envelope from a specific peer. Primitive for live agent-to-agent collaboration loops — use from a sub-agent, not the main agent."},
-				{"name": "clawdchan_reply", "summary": "Submit the user's answer to the peer's pending ask_human."},
-				{"name": "clawdchan_decline", "summary": "Decline the peer's pending ask_human on behalf of the user."},
-				{"name": "clawdchan_peer_rename", "summary": "Change a paired peer's local display alias (your override; their self-declared alias is untouched)."},
-				{"name": "clawdchan_peer_revoke", "summary": "Mark a peer's trust as revoked. Drops inbound, keeps history."},
-				{"name": "clawdchan_peer_remove", "summary": "HARD DELETE a peer and all threads/envelopes. Requires explicit confirmed=true."},
-			},
-			"peer_refs": "All peer-taking tools accept peer_id as either a 64-char hex node id, a unique hex prefix (>=4 chars), or an exact alias. 'bruce' resolves if exactly one peer has that alias; '19466' resolves if exactly one node_id starts with those chars.",
+			"setup":    setup,
+			"dispatch": dispatch,
+			"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
+				"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 			"intents": []map[string]string{
-				{"name": "say", "desc": "Default agent→agent message."},
-				{"name": "ask", "desc": "Agent→agent; peer is expected to reply."},
-				{"name": "notify_human", "desc": "FYI for the peer's human; no reply expected."},
-				{"name": "ask_human", "desc": "The peer's human must answer. Their agent is forbidden from replying."},
+				{"name": "say", "desc": "Agent→agent FYI, no reply expected (default)."},
+				{"name": "ask", "desc": "Agent→agent, peer's AGENT is expected to reply."},
+				{"name": "notify_human", "desc": "Agent→peer's HUMAN, FYI, no reply expected."},
+				{"name": "ask_human", "desc": "Agent→peer's HUMAN specifically; the peer's agent is forbidden from replying."},
 			},
 			"model": []string{
-				"Threads are internal. You talk to peers. The first clawdchan_message to a peer implicitly opens a conversation; later messages continue it.",
-				"Inbound surfaces two ways: (1) the daemon fires an OS notification like 'Alice replied — ask me about it', which brings the user back to this session; (2) call clawdchan_inbox to fetch aggregated traffic when you have reason to check.",
-				"clawdchan_message is non-blocking, even for intent=ask. Default mode (passive): send and return to the user; the reply surfaces on the next turn via clawdchan_inbox. Do NOT poll in a loop from the main agent.",
-				"ask_human envelopes from a peer are for the human, not you. pending_asks in the inbox contains them verbatim; present them to the user and call clawdchan_reply with the user's actual words (or clawdchan_decline).",
-				"ACTIVE COLLAB MODE — when the user signals live collaboration with a peer (phrases like 'collaborate with Alice on X', 'iterate with her agent until you converge', 'work it out with Bruce', or they explicitly start a real problem and say both sides are on it): spawn a sub-agent via the Task tool. Do NOT run the loop on the main agent's turn — it blocks the user and burns main-agent context. Give the sub-agent a self-contained brief: the peer_id, the problem, what 'convergence' means, a max round count (e.g. 20), and permission to use clawdchan_message + clawdchan_await in a tight loop. The sub-agent returns a final summary when converged / stuck / max rounds. Main agent immediately returns control to the user and surfaces the sub-agent's summary when it lands.",
-				"Sub-agent loop shape: clawdchan_message(peer, text, intent='ask', collab=true) → clawdchan_await(peer, timeout_seconds=10) → if envelope: integrate + respond + repeat; if timeout: send a nudge OR report 'peer went silent' and stop after 2-3 consecutive timeouts. Always exit on user-visible errors. IMPORTANT: set collab=true on every clawdchan_message during the loop. That marks the envelope (title='clawdchan:collab_sync') so the peer's side knows a sub-agent is waiting live, and can either spawn their own matching sub-agent or reply at their pace without ghosting.",
-				"RECEIVING SIDE — when clawdchan_inbox returns an envelope with content.kind='digest' and content.title='clawdchan:collab_sync', the sender has a live sub-agent waiting (~10s replies). BEFORE answering, present the choice to the user verbatim: 'X has a sub-agent waiting live on this (<preview of content.body>). Engage live too (I'll spawn my own sub-agent to match pace) or handle at your pace?'. If the user picks live: spawn a Task sub-agent with the same loop shape. If paced: reply once via clawdchan_message (no collab flag needed); the sender's sub-agent will detect the slower cadence and either continue or close out cleanly. Don't silently enter either mode — always ask.",
+				"Threads are internal. You talk to peers. First message opens a conversation; later messages continue it.",
+				"Every envelope carries `direction` (in/out) and `collab` (true for live-exchange markers). No hex compares, no title pattern-matching.",
+				"`clawdchan_message` is non-blocking even for ask. Default flow: send, end the turn, let the daemon toast the user when a reply lands. The main agent does NOT poll.",
+				"Live iterative collab loops belong in a Task sub-agent. Brief it (peer, problem, convergence criterion, max rounds), let it run `clawdchan_message(collab=true)` + `clawdchan_subagent_await` until done, fold its summary into your reply to the user.",
+				"Receiving side, collab=true inbound, no local dispatcher: ask the user once — engage live (spawn your own sub-agent) or reply at their pace.",
+				"ask_human is the peer's human's to answer. Use `clawdchan_reply` with the user's literal words or `clawdchan_decline`. Never compose an answer yourself.",
+				"The daemon fires OS notifications on inbound. Tell the user you'll surface replies on their next turn — don't implement polling yourself.",
 			},
 			"notes": []string{
-				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds.",
+				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds. Always surface them to the user verbatim.",
 				"SAS is a 4-word fingerprint. Confirm it matches on both sides over a trusted channel before sharing sensitive material.",
 			},
 		}), nil
@@ -209,8 +236,9 @@ func whoamiHandler(n *node.Node) server.ToolHandlerFunc {
 
 func peersTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_peers",
-		mcp.WithDescription("List paired peers, with inbound_count and pending_ask_count per peer. "+
-			"Use node_id as the peer_id argument for clawdchan_message / clawdchan_reply / clawdchan_decline."),
+		mcp.WithDescription("List paired peers with per-peer inbound_count, pending_asks, and last_activity_ms. "+
+			"Use node_id as the peer_id argument for clawdchan_message / clawdchan_reply / clawdchan_decline. "+
+			"Accepts hex, hex-prefix (>=4), or exact alias everywhere a peer_id is required."),
 	)
 }
 
@@ -271,16 +299,19 @@ func peersHandler(n *node.Node) server.ToolHandlerFunc {
 
 func messageTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_message",
-		mcp.WithDescription("Send a message to a paired peer. Thread bookkeeping is automatic: the first message "+
-			"to a peer opens a conversation; later messages continue it. Non-blocking — returns on relay ack, "+
-			"NOT on peer reply. Never wait in a loop for the peer's reply from the main agent; return to the user, "+
-			"and read clawdchan_inbox on the next turn (or when the daemon toast prompts the user). "+
-			"When called from a Task sub-agent running a live collab loop, set collab=true — this marks the "+
-			"envelope so the peer's side understands a sub-agent is waiting and can engage at matching pace."),
-		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to send to. Accepts a 64-char hex node id, a unique hex prefix (>=4), or an exact alias.")),
-		mcp.WithString("text", mcp.Required(), mcp.Description("Message body.")),
-		mcp.WithString("intent", mcp.Description("say | ask | notify_human | ask_human. Default 'say'. For collab loops use intent='ask'.")),
-		mcp.WithBoolean("collab", mcp.Description("Set true from a live-collab sub-agent to signal the peer their side can engage live (spawn a matching sub-agent) or pace async. Default false.")),
+		mcp.WithDescription("Send a message to a paired peer. Non-blocking — returns on relay ack, not on peer reply. "+
+			"Thread is resolved automatically. If this peer has an open ask_human pending the user, use "+
+			"clawdchan_reply (user's answer) or clawdchan_decline (user declines) instead; clawdchan_message is "+
+			"for free-form additional messages to the peer's agent."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex node id, unique hex prefix (>=4), or exact alias.")),
+		mcp.WithString("text", mcp.Required(), mcp.Description("Message body. Plain text.")),
+		mcp.WithString("intent", mcp.Description(
+			"Routing hint. Choices:\n"+
+				"  say          — agent→agent FYI, no reply expected (default)\n"+
+				"  ask          — agent→agent, peer's agent is expected to reply\n"+
+				"  notify_human — agent→peer's human, FYI, no reply expected\n"+
+				"  ask_human    — agent→peer's HUMAN specifically; the peer's agent is forbidden from replying (their human must answer or decline)")),
+		mcp.WithBoolean("collab", mcp.Description("Set true only from inside a Task sub-agent running a live iterative loop. The envelope gets the clawdchan:collab_sync marker so the peer's daemon can auto-answer (if dispatch configured) or surface the live-loop choice to their human. Do not set this from the main agent.")),
 	)
 }
 
@@ -328,6 +359,14 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 			"sent_at_ms": time.Now().UnixMilli(),
 			"collab":     collab,
 		}
+		// Pending-ask awareness: if this peer has an unanswered ask_human
+		// from us, warn. The agent should almost always answer those via
+		// clawdchan_reply (user's words) rather than a free-form message.
+		// Non-blocking — the send already happened; this is a hint for
+		// the agent's next action.
+		if hasOpenAskHumanFromPeer(ctx, n, peerID) {
+			out["pending_ask_hint"] = "This peer has an unanswered ask_human pending the user. If your text was meant as the user's answer, use clawdchan_reply instead of clawdchan_message. If it's an additional message for the peer's agent, disregard this hint."
+		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w
 		}
@@ -335,10 +374,36 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 	}
 }
 
+// hasOpenAskHumanFromPeer reports whether any thread with peer has a
+// remote ask_human that has not yet received a role=human reply from us.
+// Used by messageHandler to warn when a free-form message might be
+// misrouted (the agent should use clawdchan_reply for the user's answer).
+func hasOpenAskHumanFromPeer(ctx context.Context, n *node.Node, peer identity.NodeID) bool {
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return false
+	}
+	me := n.Identity()
+	for _, t := range threads {
+		if t.PeerID != peer {
+			continue
+		}
+		envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+		if err != nil {
+			continue
+		}
+		if len(pendingAsks(envs, me)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // collabSyncTitle is the reserved Content.Title value that marks an
-// envelope as part of an active live-collab exchange. The peer's MCP
-// surface and the daemon both key off this constant, so it's shared.
-const collabSyncTitle = "clawdchan:collab_sync"
+// envelope as part of an active live-collab exchange. This is re-exported
+// from core/policy.CollabSyncTitle so host-internal code reads naturally
+// without importing policy just for a string constant.
+const collabSyncTitle = policy.CollabSyncTitle
 
 // resolveOrOpenThread returns the most recent thread with the peer, or opens
 // a new one if none exists. Threads are persisted across sessions, so this
@@ -369,108 +434,174 @@ func resolveOrOpenThread(ctx context.Context, n *node.Node, peer identity.NodeID
 
 func inboxTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_inbox",
-		mcp.WithDescription("Return recent envelopes grouped by peer, plus pending ask_human surfaces awaiting the user. "+
-			"Pass since_ms to limit to traffic newer than a given timestamp. Pending asks are always included regardless "+
-			"of since_ms — they linger until the user answers (clawdchan_reply) or declines (clawdchan_decline). "+
-			"Each response carries now_ms; feed that back as since_ms on the next call to get only new traffic."),
-		mcp.WithNumber("since_ms", mcp.Description("Only include non-pending envelopes with created_ms > since_ms. Default 0.")),
+		mcp.WithDescription("Envelopes per peer, plus pending ask_human awaiting the user. Each envelope carries "+
+			"`direction` (in/out) and `collab` (true for live-exchange markers). Feed the returned `now_ms` back "+
+			"as `since_ms` next call for only new traffic. Pass `wait_seconds` (≤15) to long-poll when you've just "+
+			"sent something and want to check back cheaply — returns early if anything lands."),
+		mcp.WithNumber("since_ms", mcp.Description("Only include non-pending envelopes created after this ms timestamp.")),
+		mcp.WithNumber("wait_seconds", mcp.Description("Long-poll up to N seconds (max 15). 0 = non-blocking.")),
+		mcp.WithString("include", mcp.Description("'full' (default) or 'headers' to drop content bodies for cheap long-thread polling.")),
+		mcp.WithBoolean("notes_seen", mcp.Description("Omit the usage-notes field once you've internalized the pattern.")),
 	)
 }
+
+// maxInboxWaitSeconds caps how long a single inbox call can block. Anything
+// longer than ~15s fights with MCP call timeouts and with the user's
+// "why is Claude idle" impression. For tighter loops, use clawdchan_await.
+const maxInboxWaitSeconds = 15
 
 func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		since := int64(req.GetFloat("since_ms", 0))
-		threads, err := n.ListThreads(ctx)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		wait := req.GetFloat("wait_seconds", 0)
+		if wait < 0 {
+			wait = 0
 		}
-		me := n.Identity()
-
-		type bucket struct {
-			envelopes    []map[string]any
-			pendingAsks  []map[string]any
-			lastActivity int64
+		if wait > maxInboxWaitSeconds {
+			wait = maxInboxWaitSeconds
 		}
-		buckets := map[identity.NodeID]*bucket{}
+		headersOnly := strings.EqualFold(strings.TrimSpace(req.GetString("include", "full")), "headers")
+		notesSeen := req.GetBool("notes_seen", false)
 
-		for _, t := range threads {
-			envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+		deadline := time.Now().Add(time.Duration(wait * float64(time.Second)))
+		const pollInterval = 400 * time.Millisecond
+		for {
+			out, anyTraffic, hasPending, hasCollab, nowMs, err := collectInbox(ctx, n, since, headersOnly)
 			if err != nil {
-				continue
+				return mcp.NewToolResultError(err.Error()), nil
 			}
-			pending := pendingAsks(envs, me)
-			b := buckets[t.PeerID]
-			if b == nil {
-				b = &bucket{}
-				buckets[t.PeerID] = b
+			if anyTraffic || wait == 0 || !time.Now().Before(deadline) {
+				resp := map[string]any{
+					"now_ms": nowMs,
+					"peers":  out,
+				}
+				if !notesSeen {
+					resp["notes"] = inboxNotes(hasPending, hasCollab)
+				}
+				return jsonResult(resp), nil
 			}
-			for _, e := range envs {
-				if e.CreatedAtMs > b.lastActivity {
-					b.lastActivity = e.CreatedAtMs
+			select {
+			case <-ctx.Done():
+				resp := map[string]any{
+					"now_ms":    time.Now().UnixMilli(),
+					"peers":     []any{},
+					"cancelled": true,
 				}
-				if pending[e.EnvelopeID] {
-					b.pendingAsks = append(b.pendingAsks, serializeEnvelope(e))
-					continue
-				}
-				if e.CreatedAtMs > since {
-					b.envelopes = append(b.envelopes, serializeEnvelope(e))
-				}
+				return jsonResult(resp), nil
+			case <-time.After(pollInterval):
 			}
 		}
-
-		peers, _ := n.ListPeers(ctx)
-		aliasByID := map[identity.NodeID]string{}
-		for _, p := range peers {
-			aliasByID[p.NodeID] = p.Alias
-		}
-		out := make([]map[string]any, 0, len(buckets))
-		for pid, b := range buckets {
-			if len(b.envelopes) == 0 && len(b.pendingAsks) == 0 {
-				continue
-			}
-			out = append(out, map[string]any{
-				"peer_id":          hex.EncodeToString(pid[:]),
-				"alias":            aliasByID[pid],
-				"envelopes":        b.envelopes,
-				"pending_asks":     b.pendingAsks,
-				"last_activity_ms": b.lastActivity,
-			})
-		}
-		sort.Slice(out, func(i, j int) bool {
-			ai, _ := out[i]["last_activity_ms"].(int64)
-			aj, _ := out[j]["last_activity_ms"].(int64)
-			return ai > aj
-		})
-
-		return jsonResult(map[string]any{
-			"now_ms": time.Now().UnixMilli(),
-			"peers":  out,
-			"notes": []string{
-				"pending_asks contain the raw ask_human text from the peer — present to the user verbatim. Do not answer yourself; use clawdchan_reply with the user's literal words or clawdchan_decline.",
-				"Pass now_ms back as since_ms on your next call to get only newer traffic.",
-			},
-		}), nil
 	}
 }
 
-// --- await (live collab primitive) -----------------------------------------
+// inboxNotes fires a note only when it's relevant to the response payload.
+// Keeps the guidance dense and stops the agent from re-reading the same
+// four reminders on every poll.
+func inboxNotes(hasPending, hasCollab bool) []string {
+	var notes []string
+	if hasPending {
+		notes = append(notes, "pending_asks carry the peer's ask_human verbatim. Present to the user, then clawdchan_reply with their literal words or clawdchan_decline. Do not compose an answer yourself.")
+	}
+	if hasCollab {
+		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting. If their side has no dispatcher, ask the user whether to engage live or reply at their own pace.")
+	}
+	return notes
+}
 
-// awaitTool is the blocking primitive that enables rapid agent-to-agent
-// ping-pong. It is intentionally scoped to a single peer and a short
-// timeout, and is intended for use from a sub-agent (spawned via Claude
-// Code's Task tool) that owns the live collaboration loop — not the main
-// user-facing agent. The model field in the toolkit response describes the
-// orchestration pattern in detail.
+// collectInbox assembles the grouped-by-peer inbox view. Also returns
+// whether any pending_asks are present and whether any visible envelope
+// carries the collab marker, so the caller can attach only the notes
+// that are contextually relevant.
+func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bool) ([]map[string]any, bool, bool, bool, int64, error) {
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return nil, false, false, false, 0, err
+	}
+	me := n.Identity()
+
+	type bucket struct {
+		envelopes    []map[string]any
+		pendingAsks  []map[string]any
+		lastActivity int64
+	}
+	buckets := map[identity.NodeID]*bucket{}
+	hasPending, hasCollab := false, false
+
+	for _, t := range threads {
+		envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+		if err != nil {
+			continue
+		}
+		pending := pendingAsks(envs, me)
+		b := buckets[t.PeerID]
+		if b == nil {
+			b = &bucket{}
+			buckets[t.PeerID] = b
+		}
+		for _, e := range envs {
+			if e.CreatedAtMs > b.lastActivity {
+				b.lastActivity = e.CreatedAtMs
+			}
+			if pending[e.EnvelopeID] {
+				b.pendingAsks = append(b.pendingAsks, serializeEnvelope(e, me, false))
+				hasPending = true
+				continue
+			}
+			if e.CreatedAtMs > since {
+				rendered := serializeEnvelope(e, me, headersOnly)
+				if c, ok := rendered["collab"].(bool); ok && c {
+					hasCollab = true
+				}
+				b.envelopes = append(b.envelopes, rendered)
+			}
+		}
+	}
+
+	peers, _ := n.ListPeers(ctx)
+	aliasByID := map[identity.NodeID]string{}
+	for _, p := range peers {
+		aliasByID[p.NodeID] = p.Alias
+	}
+	out := make([]map[string]any, 0, len(buckets))
+	haveAny := false
+	for pid, b := range buckets {
+		if len(b.envelopes) == 0 && len(b.pendingAsks) == 0 {
+			continue
+		}
+		haveAny = true
+		out = append(out, map[string]any{
+			"peer_id":          hex.EncodeToString(pid[:]),
+			"alias":            aliasByID[pid],
+			"envelopes":        b.envelopes,
+			"pending_asks":     b.pendingAsks,
+			"last_activity_ms": b.lastActivity,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ai, _ := out[i]["last_activity_ms"].(int64)
+		aj, _ := out[j]["last_activity_ms"].(int64)
+		return ai > aj
+	})
+	return out, haveAny, hasPending, hasCollab, time.Now().UnixMilli(), nil
+}
+
+// --- subagent_await (live collab primitive) -------------------------------
+
+// awaitTool is the blocking primitive for live agent-to-agent loops.
+// Its MCP name is deliberately prefixed `clawdchan_subagent_` so every
+// tool listing carries the scope constraint — this tool freezes the
+// user-facing turn when called from the main agent, which is almost
+// never what you want.
 func awaitTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_await",
-		mcp.WithDescription("Block up to timeout_seconds waiting for the next inbound envelope from peer_id. "+
-			"Returns immediately if there's already an envelope newer than since_ms. Intended for live agent-to-agent "+
-			"loops run from a Task sub-agent: message → await → message → await. Do NOT call from the main agent — "+
-			"it freezes the user-facing turn. Unanswered ask_human envelopes are redacted the same way they are in "+
-			"clawdchan_inbox; you should not try to answer them as the agent."),
-		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex peer node id. Get from clawdchan_peers.")),
-		mcp.WithNumber("timeout_seconds", mcp.Description("Max seconds to block. Default 10, min 1, max 60. Short timeouts keep the sub-agent turn responsive to cancellation.")),
-		mcp.WithNumber("since_ms", mcp.Description("Only return envelopes with created_ms > since_ms. Default 0. Pass now_ms from the previous await response to get only newer traffic.")),
+	return mcp.NewTool("clawdchan_subagent_await",
+		mcp.WithDescription("SUB-AGENT TOOL. Blocks up to timeout_seconds waiting for the next inbound envelope "+
+			"from peer_id. Intended for a Task sub-agent's live loop: message(collab=true) → subagent_await → "+
+			"message → subagent_await. Calling this from the main agent freezes the user's turn — use "+
+			"clawdchan_inbox(wait_seconds=...) instead for gentle main-agent waits. Pending ask_human envelopes "+
+			"are redacted here too; answering as the agent is not permitted."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex, hex-prefix (>=4), or exact alias.")),
+		mcp.WithNumber("timeout_seconds", mcp.Description("Max seconds to block. Default 10, min 1, max 60.")),
+		mcp.WithNumber("since_ms", mcp.Description("Only return envelopes with created_ms > since_ms. Feed the previous response's now_ms here.")),
 	)
 }
 
@@ -545,13 +676,14 @@ func awaitHandler(n *node.Node) server.ToolHandlerFunc {
 // not answer for the human.
 func awaitResult(ctx context.Context, n *node.Node, tid envelope.ThreadID, envs []envelope.Envelope) *mcp.CallToolResult {
 	all, _ := n.ListEnvelopes(ctx, tid, 0)
-	pending := pendingAsks(all, n.Identity())
+	me := n.Identity()
+	pending := pendingAsks(all, me)
 	serialized := make([]map[string]any, 0, len(envs))
 	var pendingIDs []string
 	for _, e := range envs {
 		if pending[e.EnvelopeID] {
 			pendingIDs = append(pendingIDs, hex.EncodeToString(e.EnvelopeID[:]))
-			stub := serializeEnvelope(e)
+			stub := serializeEnvelope(e, me, false)
 			stub["content"] = map[string]any{
 				"kind": "text",
 				"text": "[redacted: ask_human awaiting human reply; use clawdchan_inbox then clawdchan_reply/clawdchan_decline]",
@@ -559,7 +691,7 @@ func awaitResult(ctx context.Context, n *node.Node, tid envelope.ThreadID, envs 
 			serialized = append(serialized, stub)
 			continue
 		}
-		serialized = append(serialized, serializeEnvelope(e))
+		serialized = append(serialized, serializeEnvelope(e, me, false))
 	}
 	out := map[string]any{
 		"envelopes": serialized,
@@ -669,7 +801,10 @@ func findThreadWithPendingAsk(ctx context.Context, n *node.Node, peer identity.N
 		}
 	}
 	if !found {
-		return envelope.ThreadID{}, fmt.Errorf("no pending ask_human from peer %s", hex.EncodeToString(peer[:]))
+		return envelope.ThreadID{}, fmt.Errorf(
+			"no pending ask_human from peer %s — clawdchan_reply / clawdchan_decline "+
+				"are only for answering a peer's ask_human. For free-form messages to the peer, use clawdchan_message",
+			hex.EncodeToString(peer[:]))
 	}
 	return best.ID, nil
 }
@@ -1029,16 +1164,33 @@ func contentPayload(c envelope.Content) map[string]any {
 	}
 }
 
-func serializeEnvelope(e envelope.Envelope) map[string]any {
-	return map[string]any{
+// serializeEnvelope renders one stored envelope into the JSON shape Claude
+// sees. Two derived fields save the agent work: direction ("in" for peer-
+// origin, "out" for local-origin — no hex compare needed) and collab
+// (true when the envelope is part of a live agent-to-agent exchange, i.e.
+// Content.Title is the reserved CollabSyncTitle — no title pattern-match
+// needed). headersOnly drops the content body for cheap polling over
+// long threads.
+func serializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool) map[string]any {
+	dir := "in"
+	if e.From.NodeID == me {
+		dir = "out"
+	}
+	collab := e.Content.Kind == envelope.ContentDigest && e.Content.Title == policy.CollabSyncTitle
+	out := map[string]any{
 		"envelope_id":   hex.EncodeToString(e.EnvelopeID[:]),
 		"from_node":     hex.EncodeToString(e.From.NodeID[:]),
 		"from_alias":    e.From.Alias,
 		"from_role":     roleName(e.From.Role),
 		"intent":        intentName(e.Intent),
 		"created_at_ms": e.CreatedAtMs,
-		"content":       contentPayload(e.Content),
+		"direction":     dir,
+		"collab":        collab,
 	}
+	if !headersOnly {
+		out["content"] = contentPayload(e.Content)
+	}
+	return out
 }
 
 func jsonResult(v any) *mcp.CallToolResult {

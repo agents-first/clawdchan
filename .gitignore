@@ -23,6 +23,9 @@
 # Claude Code local settings
 .claude/
 
+# Fly.io configuration file
+fly.toml
+
 # Gemini CLI local settings
 .gemini/
 
