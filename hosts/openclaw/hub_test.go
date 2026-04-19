@@ -29,10 +29,10 @@ func newHubGateway(t *testing.T, token string) (*fakeGateway, *hubGatewayCapture
 		switch req.Method {
 		case "sessions.create":
 			var params struct {
-				Name string `json:"name"`
+				Key string `json:"key"`
 			}
-			if err := json.Unmarshal(req.Params, &params); err == nil && params.Name != "" {
-				cap.creates <- params.Name
+			if err := json.Unmarshal(req.Params, &params); err == nil && params.Key != "" {
+				cap.creates <- params.Key
 			}
 		case "sessions.send":
 			var params struct {
