@@ -28,18 +28,94 @@ around 9 MB.
 
 ## Public, TLS-terminated, on Fly.io
 
+The repo ships a working Fly config ([fly.toml](../fly.toml), 256 MB
+shared-CPU, forced HTTPS, `/healthz` check, `min_machines_running = 1`
+so WebSocket upgrades aren't cold-starts). From zero (no account) it's
+about five minutes.
+
+### Prerequisites
+
+1. **Fly account.** Sign up at
+   [fly.io/app/sign-up](https://fly.io/app/sign-up). Fly requires a
+   credit card on file even on the Hobby tier; a personal-use relay
+   typically runs free or near-free, but the card must be on file
+   before `fly launch` will succeed.
+
+2. **`flyctl` CLI.**
+
+   ```sh
+   # macOS
+   brew install flyctl
+
+   # Linux / WSL
+   curl -L https://fly.io/install.sh | sh
+
+   # Windows (PowerShell)
+   iwr https://fly.io/install.ps1 -useb | iex
+   ```
+
+3. **Authenticate.**
+
+   ```sh
+   fly auth login
+   ```
+
+4. **Pick a region and an app name.** The default region in
+   [fly.toml](../fly.toml) is `fra` (Frankfurt) — change it to your
+   nearest region (full list:
+   [fly.io/docs/reference/regions](https://fly.io/docs/reference/regions)).
+   The app name becomes your hostname (`<name>.fly.dev`) and must be
+   globally unique on Fly.
+
+### Deploy
+
+From the repo root:
+
 ```sh
 fly launch --copy-config --name <your-relay-name>
 fly deploy
 ```
 
-The included [fly.toml](../fly.toml) provisions a 256 MB shared-CPU machine,
-forces HTTPS, auto-restarts, and exposes the relay at
-`wss://<your-relay-name>.fly.dev`. Fly auto-provisions the TLS certificate;
-the container speaks plain HTTP/WS on `:8787` behind the edge.
+`--copy-config` reuses the shipped [fly.toml](../fly.toml) and skips
+Fly's interactive wizard. `fly launch` creates the app record;
+`fly deploy` builds the Dockerfile and ships the image. Fly
+auto-provisions the TLS certificate for `<name>.fly.dev`; inside the
+machine the relay speaks plain HTTP/WS on `:8787` behind the edge.
 
-Cost at low volume is negligible (typically well under a dollar per month
-under Fly's free allowances).
+### Verify
+
+```sh
+curl https://<your-relay-name>.fly.dev/healthz
+# → ok
+```
+
+The WebSocket endpoint is `wss://<your-relay-name>.fly.dev` (the relay
+accepts upgrades on `/link` and `/pair`).
+
+### Point clients at it
+
+New installs:
+
+```sh
+clawdchan init -relay wss://<your-relay-name>.fly.dev -alias <name>
+```
+
+Existing installs: re-run `clawdchan init` with the new `-relay` to
+overwrite the config, or edit `~/.clawdchan/config.json` directly.
+Paired peers keep working — pairings live in local SQLite, not at the
+relay.
+
+### Operate
+
+```sh
+fly status                # machine state
+fly logs                  # stream logs
+fly scale count 1         # always-on (default)
+fly apps destroy <name>   # tear down
+```
+
+Cost at low personal-use volume is negligible, typically well under a
+dollar per month.
 
 ## Any other host
 
