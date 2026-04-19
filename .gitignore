@@ -22,3 +22,15 @@
 
 # Claude Code local settings
 .claude/
+
+# Gemini CLI local settings
+.gemini/
+
+# Per-project MCP wiring (contains absolute paths; dev-specific)
+.mcp.json
+
+# Local git worktrees used during parallel agent runs
+.worktrees/
+
+# Superpowers plans are local scratch space for the brainstorming flow
+docs/superpowers/plans/
