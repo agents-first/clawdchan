@@ -50,6 +50,14 @@ type config struct {
 	RelayURL string          `json:"relay_url"`
 	Alias    string          `json:"alias"`
 	Dispatch *dispatchConfig `json:"agent_dispatch,omitempty"`
+
+	// OpenClaw fields are optional. When OpenClawURL is empty, the daemon
+	// runs in its default CC-only mode. When set, the daemon connects to the
+	// gateway and routes inbound human-surface traffic into OpenClaw sessions
+	// in addition to firing OS notifications for Claude Code.
+	OpenClawURL      string `json:"openclaw_url,omitempty"`
+	OpenClawToken    string `json:"openclaw_token,omitempty"`
+	OpenClawDeviceID string `json:"openclaw_device_id,omitempty"`
 }
 
 // dispatchConfig controls the daemon's agent-cadence collab path. When
@@ -64,16 +72,6 @@ type dispatchConfig struct {
 	TimeoutSeconds  int      `json:"timeout_seconds,omitempty"`
 	MaxContext      int      `json:"max_thread_context,omitempty"`
 	MaxCollabRounds int      `json:"max_collab_rounds,omitempty"`
-
-	// OpenClaw fields are optional. When OpenClawURL is empty, the daemon
-	// runs in its default CC-only mode. When set, the daemon connects to the
-	// gateway and routes inbound human-surface traffic into OpenClaw sessions
-	// in addition to firing OS notifications for Claude Code. This lives here
-	// (rather than in a separate file) so `clawdchan setup` can configure
-	// everything end-to-end in one pass.
-	OpenClawURL      string `json:"openclaw_url,omitempty"`
-	OpenClawToken    string `json:"openclaw_token,omitempty"`
-	OpenClawDeviceID string `json:"openclaw_device_id,omitempty"`
 }
 
 const configFileName = "config.json"
