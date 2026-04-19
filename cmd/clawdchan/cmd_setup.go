@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -85,13 +86,11 @@ func cmdSetup(args []string) error {
 	if c.OpenClawURL != "" {
 		fmt.Println()
 		fmt.Println("  OpenClaw:")
-		fmt.Println("    1. Restart the OpenClaw gateway so it sees the new agent:")
-		fmt.Println("         openclaw gateway restart")
-		fmt.Println("    2. Open OpenClaw — you'll see a session named \"clawdchan:hub\".")
-		fmt.Println("    3. To start a pairing, just say: \"pair me with someone on clawdchan\".")
+		fmt.Println("    1. Open OpenClaw — you'll see a session named \"clawdchan:hub\".")
+		fmt.Println("    2. To start a pairing, just say: \"pair me with someone on clawdchan\".")
 		fmt.Println("       Your agent replies with 12 words. Send them to your friend.")
-		fmt.Println("    4. When your friend pastes their 12 words, say: \"consume these: <words>\".")
-		fmt.Println("    5. A new session for that peer appears automatically — talk there to chat.")
+		fmt.Println("    3. When your friend pastes their 12 words, say: \"consume these: <words>\".")
+		fmt.Println("    4. A new session for that peer appears automatically — talk there to chat.")
 		fmt.Println("    Other things you can say in the hub: \"who am I paired with\", \"any new messages\".")
 		if daemonAlreadyInstalled() {
 			fmt.Println()
@@ -111,7 +110,7 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) (err error
 		if err == nil {
 			c, loadErr := loadConfig()
 			if loadErr == nil && c.OpenClawURL != "" {
-				deployOpenClawAgentAssets()
+				deployOpenClawAssets(yes)
 			}
 		}
 	}()
@@ -386,12 +385,20 @@ You are equipped with the **ClawdChan MCP Toolkit**, which allows you to communi
 - You can talk to humans using Claude Code or other OpenClaw instances.
 `
 
+func deployOpenClawAssets(yes bool) {
+	deployOpenClawAgentAssets()
+	_ = registerClawdChanMCP()
+	if !yes && stdinIsTTY() {
+		restartOpenClawGateway()
+	}
+}
+
 func deployOpenClawAgentAssets() {
 	home, _ := os.UserHomeDir()
 	ocPath := filepath.Join(home, ".openclaw", "openclaw.json")
 	data, err := os.ReadFile(ocPath)
 	if err != nil {
-		return // OpenClaw not installed or different home
+		return
 	}
 
 	var ocConfig struct {
@@ -439,4 +446,42 @@ func deployOpenClawAgentAssets() {
 	if count > 0 {
 		fmt.Printf("[ok] Deployed ClawdChan guide to %d OpenClaw agent workspace(s)\n", count)
 	}
+}
+
+func registerClawdChanMCP() error {
+	mcpBin, err := resolveMCPBinary()
+	if err != nil {
+		return err
+	}
+	
+	// Create JSON command object for 'openclaw mcp set'
+	cmdObj := map[string]string{
+		"command": mcpBin,
+	}
+	raw, _ := json.Marshal(cmdObj)
+
+	cmd := exec.Command("openclaw", "mcp", "set", "clawdchan", string(raw))
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	fmt.Println("[ok] Registered ClawdChan MCP server in OpenClaw")
+	return nil
+}
+
+func restartOpenClawGateway() {
+	fmt.Println()
+	fmt.Println("OpenClaw configuration has changed.")
+	ok, err := promptYN("Restart OpenClaw Gateway now to apply changes? [Y/n]: ", true)
+	if err != nil || !ok {
+		fmt.Println("Skipped restart. Remember to run `openclaw gateway restart` later.")
+		return
+	}
+
+	fmt.Print("Restarting OpenClaw gateway... ")
+	cmd := exec.Command("openclaw", "gateway", "restart")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("failed: %v\n", err)
+		return
+	}
+	fmt.Println("done.")
 }
