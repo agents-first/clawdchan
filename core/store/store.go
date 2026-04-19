@@ -17,7 +17,7 @@ import (
 )
 
 // Store is the aggregate persistence interface. A single SQLite file backs all
-// of it. Tables: identity, peers, threads, envelopes, outbox.
+// of it. Tables: identity, peers, threads, envelopes, outbox, openclaw_sessions.
 type Store interface {
 	LoadIdentity(ctx context.Context) (*identity.Identity, error)
 	SaveIdentity(ctx context.Context, id *identity.Identity) error
@@ -25,6 +25,8 @@ type Store interface {
 	UpsertPeer(ctx context.Context, p pairing.Peer) error
 	ListPeers(ctx context.Context) ([]pairing.Peer, error)
 	GetPeer(ctx context.Context, nodeID identity.NodeID) (pairing.Peer, error)
+	GetOpenClawSession(ctx context.Context, nodeID identity.NodeID) (string, bool, error)
+	SetOpenClawSession(ctx context.Context, nodeID identity.NodeID, sid string) error
 	RevokePeer(ctx context.Context, nodeID identity.NodeID) error
 	// SetPeerAlias overrides the peer's display alias locally without
 	// touching the rest of the record. Returns ErrNotFound if the peer
@@ -132,6 +134,13 @@ func Open(path string) (Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS openclaw_sessions (
+		node_id    BLOB PRIMARY KEY,
+		session_id TEXT NOT NULL
+	)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate openclaw_sessions: %w", err)
+	}
 	return &sqliteStore{db: db}, nil
 }
 
@@ -207,6 +216,28 @@ func (s *sqliteStore) GetPeer(ctx context.Context, nodeID identity.NodeID) (pair
 		return pairing.Peer{}, ErrNotFound
 	}
 	return p, err
+}
+
+func (s *sqliteStore) GetOpenClawSession(ctx context.Context, nodeID identity.NodeID) (string, bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT session_id FROM openclaw_sessions WHERE node_id = ?`, nodeID[:])
+	var sid string
+	if err := row.Scan(&sid); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return sid, true, nil
+}
+
+func (s *sqliteStore) SetOpenClawSession(ctx context.Context, nodeID identity.NodeID, sid string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO openclaw_sessions (node_id, session_id)
+		VALUES (?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET
+			session_id=excluded.session_id
+	`, nodeID[:], sid)
+	return err
 }
 
 func (s *sqliteStore) RevokePeer(ctx context.Context, nodeID identity.NodeID) error {

@@ -308,7 +308,7 @@ func verifyTestNotification() {
 	}
 
 	fmt.Println()
-	fmt.Println("macOS / your OS is suppressing the notification despite the delivery API reporting success.")
+	fmt.Println("Your OS is suppressing the notification despite the delivery API reporting success.")
 	fmt.Println("Most common causes:")
 	fmt.Println("  - Focus Mode / Do Not Disturb is on.")
 	fmt.Println("  - The per-app 'Allow Notifications' switch is off for the notifier backend.")

@@ -8,37 +8,29 @@ import (
 	"strings"
 )
 
-// dispatch fires a Windows notification using a PowerShell balloon tip.
-// Balloon tips are a legacy .NET primitive, but on Windows 10/11 the OS
-// forwards them into the Action Center toast stream — so the user sees a
-// real toast with title + body text and hears the standard notification
-// sound. No third-party installs required; works on any Windows with
-// PowerShell (all supported versions).
-//
-// The 6s ShowBalloonTip + 7s Start-Sleep lets the toast render and sit in
-// the Action Center before the NotifyIcon object is disposed.
+// dispatch fires a Windows native Toast notification using WinRT APIs via PowerShell.
+// This is more robust than legacy BalloonTips on Windows 10/11 as it doesn't
+// require a visible tray icon and correctly populates the Action Center.
 func dispatch(m Message) error {
-	// Balloon tips don't have a separate subtitle; fold into body.
+	// ToastText02 is a template with a bold title and a regular body.
 	body := m.Body
 	if m.Subtitle != "" {
 		body = m.Subtitle + "\n" + strings.TrimSpace(m.Body)
 	}
-	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$ni = New-Object System.Windows.Forms.NotifyIcon
-$ni.Icon = [System.Drawing.SystemIcons]::Information
-$ni.BalloonTipTitle = %s
-$ni.BalloonTipText = %s
-$ni.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
-$ni.Visible = $true
-$ni.ShowBalloonTip(6000)
-Start-Sleep -Seconds 7
-$ni.Dispose()
+
+	script := fmt.Sprintf(`
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName("text")
+$textNodes.Item(0).AppendChild($template.CreateTextNode(%s)) | Out-Null
+$textNodes.Item(1).AppendChild($template.CreateTextNode(%s)) | Out-Null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+# Using a more standard AppID that Windows is less likely to ignore
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.controlpanel").Show($toast)
 `, psQuote(m.Title), psQuote(body))
 
-	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-")
-	cmd.Stdin = strings.NewReader(script)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	return cmd.Run()
 }
 

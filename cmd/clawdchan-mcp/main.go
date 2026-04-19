@@ -26,6 +26,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/vMaroon/ClawdChan/core/surface"
 	"github.com/vMaroon/ClawdChan/hosts/claudecode"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
@@ -62,9 +63,17 @@ func main() {
 	defer cancel()
 
 	id := n.Identity()
-	daemon := daemonRunning(cfg.DataDir, hex.EncodeToString(id[:]))
-	if daemon {
-		log.Printf("clawdchan-mcp: daemon detected, skipping relay connect (daemon owns inbound + outbox drain)")
+	daemon := daemonStateForNode(cfg.DataDir, hex.EncodeToString(id[:]))
+	if daemon.openclawHost {
+		n.SetHumanSurface(surface.NopHuman{})
+		n.SetAgentSurface(surface.NopAgent{})
+	}
+	if daemon.running {
+		if daemon.openclawHost {
+			log.Printf("clawdchan-mcp: openclaw daemon mode detected, running outbox-writer-only (no Claude human surface)")
+		} else {
+			log.Printf("clawdchan-mcp: daemon detected, skipping relay connect (daemon owns inbound + outbox drain)")
+		}
 	} else {
 		if err := n.Start(ctx); err != nil {
 			log.Fatalf("clawdchan-mcp: start node: %v", err)
@@ -91,31 +100,36 @@ func main() {
 	}
 	defer unregister()
 
-	log.Printf("clawdchan-mcp ready (alias=%q node=%x relay=%s daemon=%v)", cfg.Alias, id[:8], cfg.RelayURL, daemon)
+	log.Printf("clawdchan-mcp ready (alias=%q node=%x relay=%s daemon=%v openclaw_host=%v)", cfg.Alias, id[:8], cfg.RelayURL, daemon.running, daemon.openclawHost)
 
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("clawdchan-mcp: serve: %v", err)
 	}
 }
 
-// daemonRunning reports whether another process is already holding the relay
-// link for this node — i.e. a running `clawdchan daemon` (or `clawdchan
-// listen`). Both register as KindCLI. Presence tells the MCP server to skip
-// its own relay connect and let the daemon own inbound and outbox drain.
-func daemonRunning(dataDir, nodeID string) bool {
+type daemonMode struct {
+	running      bool
+	openclawHost bool
+}
+
+// daemonStateForNode reports whether another process is already holding the
+// relay link for this node — i.e. a running `clawdchan daemon` (or `clawdchan
+// listen`). In OpenClaw host mode, MCP must remain outbox-writer-only and not
+// register a Claude human surface.
+func daemonStateForNode(dataDir, nodeID string) daemonMode {
 	entries, err := listenerreg.List(dataDir)
 	if err != nil {
-		return false
+		return daemonMode{}
 	}
 	for _, e := range entries {
 		if !strings.EqualFold(e.NodeID, nodeID) {
 			continue
 		}
 		if e.Kind == listenerreg.KindCLI {
-			return true
+			return daemonMode{running: true, openclawHost: e.OpenClawHostActive}
 		}
 	}
-	return false
+	return daemonMode{}
 }
 
 func loadConfig() (config, error) {

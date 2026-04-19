@@ -19,6 +19,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/node"
 	"github.com/vMaroon/ClawdChan/core/notify"
 	"github.com/vMaroon/ClawdChan/core/surface"
+	"github.com/vMaroon/ClawdChan/hosts/openclaw"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
@@ -62,6 +63,9 @@ func cmdDaemon(args []string) error {
 func daemonRun(args []string) error {
 	fs := flag.NewFlagSet("daemon run", flag.ExitOnError)
 	verbose := fs.Bool("v", false, "log every inbound to stderr (default: silent — only OS notifications)")
+	openClawURL := fs.String("openclaw", "", "OpenClaw gateway WebSocket URL (optional)")
+	openClawToken := fs.String("openclaw-token", "", "OpenClaw gateway bearer token")
+	openClawDeviceID := fs.String("openclaw-device-id", "clawdchan-daemon", "OpenClaw gateway device id")
 	fs.Parse(args)
 
 	c, err := loadConfig()
@@ -90,10 +94,34 @@ func daemonRun(args []string) error {
 	}
 	defer n.Stop()
 
+	if *openClawURL == "" && c.OpenClawURL != "" {
+		*openClawURL = c.OpenClawURL
+	}
+	if *openClawToken == "" && c.OpenClawToken != "" {
+		*openClawToken = c.OpenClawToken
+	}
+	if c.OpenClawDeviceID != "" && *openClawDeviceID == "clawdchan-daemon" {
+		*openClawDeviceID = c.OpenClawDeviceID
+	}
+
+	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID)
+	if err != nil {
+		return err
+	}
+	if ocRuntime != nil {
+		defer ocRuntime.Close()
+	}
+
 	nid := n.Identity()
 	unreg, regErr := listenerreg.Register(
 		c.DataDir, listenerreg.KindCLI,
 		hex.EncodeToString(nid[:]), c.RelayURL, c.Alias,
+		listenerreg.RegisterOptions{
+			OpenClawHostActive: ocRuntime != nil,
+			OpenClawURL:        *openClawURL,
+			OpenClawToken:      *openClawToken,
+			OpenClawDeviceID:   *openClawDeviceID,
+		},
 	)
 	if regErr != nil {
 		fmt.Fprintf(os.Stderr, "warn: listener registry: %v\n", regErr)
@@ -107,6 +135,74 @@ func daemonRun(args []string) error {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
 	return nil
+}
+
+type openClawRuntime struct {
+	bridge     *openclaw.Bridge
+	cancelSubs []context.CancelFunc
+}
+
+func (r *openClawRuntime) Close() {
+	if r == nil {
+		return
+	}
+	for _, cancel := range r.cancelSubs {
+		cancel()
+	}
+	if r.bridge != nil {
+		_ = r.bridge.Close()
+	}
+}
+
+func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string) (*openClawRuntime, error) {
+	if wsURL == "" {
+		return nil, nil
+	}
+	cleanup := &openClawRuntime{}
+	defer func() {
+		if cleanup == nil {
+			return
+		}
+		cleanup.Close()
+	}()
+
+	bridge := openclaw.NewBridge(wsURL, token, deviceID)
+	if err := bridge.Connect(ctx); err != nil {
+		return nil, fmt.Errorf("openclaw connect: %w", err)
+	}
+	cleanup.bridge = bridge
+
+	sm := openclaw.NewSessionMap(bridge, n.Store())
+	peers, err := n.ListPeers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list peers for openclaw sessions: %w", err)
+	}
+	for _, p := range peers {
+		if _, err := sm.EnsureSessionFor(ctx, p.NodeID); err != nil {
+			return nil, fmt.Errorf("ensure openclaw session for peer %x: %w", p.NodeID[:8], err)
+		}
+	}
+
+	n.SetHumanSurface(openclaw.NewHumanSurface(sm, bridge))
+	n.SetAgentSurface(openclaw.NewAgentSurface(sm, bridge))
+
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list threads for openclaw subscribers: %w", err)
+	}
+	for _, th := range threads {
+		sid, err := sm.EnsureSessionForThread(ctx, th.ID)
+		if err != nil {
+			return nil, fmt.Errorf("ensure openclaw session for thread %x: %w", th.ID[:], err)
+		}
+		subCtx, subCancel := context.WithCancel(ctx)
+		cleanup.cancelSubs = append(cleanup.cancelSubs, subCancel)
+		go bridge.RunSubscriber(subCtx, sid, n, th.ID)
+	}
+
+	keep := cleanup
+	cleanup = nil
+	return keep, nil
 }
 
 // daemonSurface receives inbound envelopes and fires OS notifications.

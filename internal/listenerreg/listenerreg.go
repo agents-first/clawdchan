@@ -40,6 +40,21 @@ type Entry struct {
 	NodeID    string `json:"node_id"`
 	RelayURL  string `json:"relay_url"`
 	Alias     string `json:"alias"`
+	// OpenClawHostActive marks that this listener is running in OpenClaw host
+	// mode (daemon `-openclaw ...`), so other hosts should avoid owning human
+	// surface callbacks on this machine.
+	OpenClawHostActive bool   `json:"openclaw_host_active,omitempty"`
+	OpenClawURL        string `json:"openclaw_url,omitempty"`
+	OpenClawToken      string `json:"openclaw_token,omitempty"`
+	OpenClawDeviceID   string `json:"openclaw_device_id,omitempty"`
+}
+
+// RegisterOptions carries optional mode metadata for a listener entry.
+type RegisterOptions struct {
+	OpenClawHostActive bool
+	OpenClawURL        string
+	OpenClawToken      string
+	OpenClawDeviceID   string
 }
 
 func dirFor(dataDir string) string { return filepath.Join(dataDir, "listeners") }
@@ -47,9 +62,13 @@ func dirFor(dataDir string) string { return filepath.Join(dataDir, "listeners") 
 // Register writes a pidfile for the current process under dataDir/listeners/
 // and returns an unregister function. Callers must defer the returned
 // function; the pidfile is automatically removed when it runs.
-func Register(dataDir string, kind Kind, nodeID, relayURL, alias string) (func(), error) {
+func Register(dataDir string, kind Kind, nodeID, relayURL, alias string, opts ...RegisterOptions) (func(), error) {
 	if dataDir == "" {
 		return func() {}, errors.New("listenerreg: empty data dir")
+	}
+	var opt RegisterOptions
+	if len(opts) > 0 {
+		opt = opts[0]
 	}
 	d := dirFor(dataDir)
 	if err := os.MkdirAll(d, 0o700); err != nil {
@@ -57,12 +76,16 @@ func Register(dataDir string, kind Kind, nodeID, relayURL, alias string) (func()
 	}
 	pid := os.Getpid()
 	entry := Entry{
-		PID:       pid,
-		Kind:      kind,
-		StartedMs: time.Now().UnixMilli(),
-		NodeID:    nodeID,
-		RelayURL:  relayURL,
-		Alias:     alias,
+		PID:                pid,
+		Kind:               kind,
+		StartedMs:          time.Now().UnixMilli(),
+		NodeID:             nodeID,
+		RelayURL:           relayURL,
+		Alias:              alias,
+		OpenClawHostActive: opt.OpenClawHostActive,
+		OpenClawURL:        opt.OpenClawURL,
+		OpenClawToken:      opt.OpenClawToken,
+		OpenClawDeviceID:   opt.OpenClawDeviceID,
 	}
 	path := filepath.Join(d, fmt.Sprintf("%d.json", pid))
 	blob, err := json.MarshalIndent(entry, "", "  ")
