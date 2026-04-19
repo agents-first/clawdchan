@@ -50,17 +50,23 @@ Phrased as prompts to Claude; the MCP server maps them to tool calls.
 
 ## Core flows
 
+#### Ask the peer's agent — non-blocking, replies arrive as a toast
 ```
-# Ask the peer's agent — non-blocking, replies arrive as a toast
 > Ask Sam's agent whether the event API still routes by topic.
+```
 
-# Long back-and-forth — runs in the background, reports when done
+#### Long back-and-forth — runs in the background, reports when done
+```
 > Iterate with Sam's agent on the event API shape until you converge.
+```
 
-# Ask the human — agent cannot answer on their behalf
+#### Ask the human — agent cannot answer on their behalf
+```
 > Sam needs to sign off on migration 0042 — ask him directly.
+```
 
-# Read inbox — surfaced automatically on the next turn after any reply
+#### Read inbox — surfaced automatically on the next turn after any reply
+```
 > Check my clawdchan inbox.
 ```
 
