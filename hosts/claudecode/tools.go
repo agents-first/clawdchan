@@ -39,6 +39,9 @@ func RegisterTools(s *server.MCPServer, n *node.Node) {
 	s.AddTool(awaitTool(), awaitHandler(n))
 	s.AddTool(replyTool(), replyHandler(n))
 	s.AddTool(declineTool(), declineHandler(n))
+	s.AddTool(peerRenameTool(), peerRenameHandler(n))
+	s.AddTool(peerRevokeTool(), peerRevokeHandler(n))
+	s.AddTool(peerRemoveTool(), peerRemoveHandler(n))
 }
 
 // --- toolkit ----------------------------------------------------------------
@@ -72,7 +75,11 @@ func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 				{"name": "clawdchan_await", "summary": "Short blocking wait (≤60s) for the next inbound envelope from a specific peer. Primitive for live agent-to-agent collaboration loops — use from a sub-agent, not the main agent."},
 				{"name": "clawdchan_reply", "summary": "Submit the user's answer to the peer's pending ask_human."},
 				{"name": "clawdchan_decline", "summary": "Decline the peer's pending ask_human on behalf of the user."},
+				{"name": "clawdchan_peer_rename", "summary": "Change a paired peer's local display alias (your override; their self-declared alias is untouched)."},
+				{"name": "clawdchan_peer_revoke", "summary": "Mark a peer's trust as revoked. Drops inbound, keeps history."},
+				{"name": "clawdchan_peer_remove", "summary": "HARD DELETE a peer and all threads/envelopes. Requires explicit confirmed=true."},
 			},
+			"peer_refs": "All peer-taking tools accept peer_id as either a 64-char hex node id, a unique hex prefix (>=4 chars), or an exact alias. 'bruce' resolves if exactly one peer has that alias; '19466' resolves if exactly one node_id starts with those chars.",
 			"intents": []map[string]string{
 				{"name": "say", "desc": "Default agent→agent message."},
 				{"name": "ask", "desc": "Agent→agent; peer is expected to reply."},
@@ -283,7 +290,7 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		peerID, err := parseNodeID(peerStr)
+		peerID, err := resolvePeerRef(ctx, n, peerStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -450,7 +457,7 @@ func awaitHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		peerID, err := parseNodeID(peerStr)
+		peerID, err := resolvePeerRef(ctx, n, peerStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -564,7 +571,7 @@ func replyHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		peerID, err := parseNodeID(peerStr)
+		peerID, err := resolvePeerRef(ctx, n, peerStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -594,7 +601,7 @@ func declineHandler(n *node.Node) server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		reason := req.GetString("reason", "declined by user")
-		peerID, err := parseNodeID(peerStr)
+		peerID, err := resolvePeerRef(ctx, n, peerStr)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -756,6 +763,111 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 	}
 }
 
+// --- peer management (rename / revoke / remove) ---------------------------
+
+func peerRenameTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_peer_rename",
+		mcp.WithDescription("Change a paired peer's local display alias. This is your override — the peer's own self-declared alias is unaffected. Useful when the user says 'rename Bruce to Bruce Wayne' or 'call them Alice Anderson'."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to rename. Accepts a hex node id, a unique hex prefix (>=4), or an exact alias.")),
+		mcp.WithString("alias", mcp.Required(), mcp.Description("New display alias. Non-empty.")),
+	)
+}
+
+func peerRenameHandler(n *node.Node) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ref, err := req.RequireString("peer_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		alias, err := req.RequireString("alias")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if strings.TrimSpace(alias) == "" {
+			return mcp.NewToolResultError("alias cannot be empty"), nil
+		}
+		peerID, err := resolvePeerRef(ctx, n, ref)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		before, _ := n.GetPeer(ctx, peerID)
+		if err := n.SetPeerAlias(ctx, peerID, alias); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"ok":       true,
+			"peer_id":  hex.EncodeToString(peerID[:]),
+			"previous": before.Alias,
+			"alias":    alias,
+		}), nil
+	}
+}
+
+func peerRevokeTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_peer_revoke",
+		mcp.WithDescription("Mark a peer's trust as revoked. Inbound envelopes from them will be dropped; outbound sends will error. The record and history stay — use clawdchan_peer_remove for a full delete. Only call with explicit user intent ('revoke Alice', 'stop trusting Bruce', 'cut off X')."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to revoke. Accepts hex, prefix, or alias.")),
+	)
+}
+
+func peerRevokeHandler(n *node.Node) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ref, err := req.RequireString("peer_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		peerID, err := resolvePeerRef(ctx, n, ref)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		p, _ := n.GetPeer(ctx, peerID)
+		if err := n.RevokePeer(ctx, peerID); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"ok":      true,
+			"peer_id": hex.EncodeToString(peerID[:]),
+			"alias":   p.Alias,
+			"note":    "trust=revoked. Inbound dropped; history preserved. Use clawdchan_peer_remove for a hard delete.",
+		}), nil
+	}
+}
+
+func peerRemoveTool() mcp.Tool {
+	return mcp.NewTool("clawdchan_peer_remove",
+		mcp.WithDescription("HARD DELETE a peer plus all threads, envelopes, and outbox entries tied to them. Irreversible. Confirm with the user first using their own words — this is destructive. Only call when the user explicitly asks to 'remove', 'delete', or 'forget' a peer."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to delete. Accepts hex, prefix, or alias.")),
+		mcp.WithBoolean("confirmed", mcp.Required(), mcp.Description("Must be true. Set only after the user has explicitly confirmed the destructive action in plain English.")),
+	)
+}
+
+func peerRemoveHandler(n *node.Node) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ref, err := req.RequireString("peer_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		confirmed := req.GetBool("confirmed", false)
+		if !confirmed {
+			return mcp.NewToolResultError("refusing to delete without confirmed=true. Ask the user explicitly and only then retry with confirmed=true."), nil
+		}
+		peerID, err := resolvePeerRef(ctx, n, ref)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		p, _ := n.GetPeer(ctx, peerID)
+		if err := n.DeletePeer(ctx, peerID); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"ok":      true,
+			"peer_id": hex.EncodeToString(peerID[:]),
+			"alias":   p.Alias,
+			"note":    "hard-deleted. All threads, envelopes, outbox entries for this peer are gone. Pairing would require a fresh mnemonic.",
+		}), nil
+	}
+}
+
 // --- parsing / serialization helpers ---------------------------------------
 
 func parseNodeID(s string) (identity.NodeID, error) {
@@ -769,6 +881,62 @@ func parseNodeID(s string) (identity.NodeID, error) {
 	var id identity.NodeID
 	copy(id[:], b)
 	return id, nil
+}
+
+// resolvePeerRef accepts any of: full 64-char hex node id, a unique hex
+// prefix (>=4), or an exact (case-insensitive) alias match. Returns the
+// resolved NodeID or a descriptive error. This is what peer-taking tools
+// use so Claude can pass "bruce" from user speech instead of 64 chars of
+// hex the model has to carry in context.
+func resolvePeerRef(ctx context.Context, n *node.Node, ref string) (identity.NodeID, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return identity.NodeID{}, fmt.Errorf("empty peer reference")
+	}
+	if len(ref) == 64 {
+		if id, err := parseNodeID(ref); err == nil {
+			if _, err := n.GetPeer(ctx, id); err == nil {
+				return id, nil
+			}
+			return identity.NodeID{}, fmt.Errorf("no paired peer with node_id %s", ref)
+		}
+	}
+
+	peers, err := n.ListPeers(ctx)
+	if err != nil {
+		return identity.NodeID{}, err
+	}
+
+	var aliasMatches []identity.NodeID
+	for _, p := range peers {
+		if strings.EqualFold(p.Alias, ref) {
+			aliasMatches = append(aliasMatches, p.NodeID)
+		}
+	}
+	if len(aliasMatches) == 1 {
+		return aliasMatches[0], nil
+	}
+	if len(aliasMatches) > 1 {
+		return identity.NodeID{}, fmt.Errorf("alias %q is ambiguous (%d peers); pass a hex prefix or the full node_id", ref, len(aliasMatches))
+	}
+
+	lower := strings.ToLower(ref)
+	if len(lower) >= 4 {
+		var prefixMatches []identity.NodeID
+		for _, p := range peers {
+			if strings.HasPrefix(hex.EncodeToString(p.NodeID[:]), lower) {
+				prefixMatches = append(prefixMatches, p.NodeID)
+			}
+		}
+		if len(prefixMatches) == 1 {
+			return prefixMatches[0], nil
+		}
+		if len(prefixMatches) > 1 {
+			return identity.NodeID{}, fmt.Errorf("hex prefix %q is ambiguous (%d peers); use more characters", ref, len(prefixMatches))
+		}
+	}
+
+	return identity.NodeID{}, fmt.Errorf("no peer matches %q — use clawdchan_peers to see paired peers", ref)
 }
 
 func parseMessageIntent(s string) (envelope.Intent, error) {

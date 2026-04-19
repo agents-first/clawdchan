@@ -242,6 +242,28 @@ func (n *Node) GetPeer(ctx context.Context, id identity.NodeID) (pairing.Peer, e
 	return n.store.GetPeer(ctx, id)
 }
 
+// SetPeerAlias overrides the local display alias for a peer. The peer's
+// own self-declared alias (from pairing or envelope headers) is kept in
+// the envelope's From.Alias but the store-backed alias is what surfaces
+// in CLI listings, MCP tool output, and daemon notifications.
+func (n *Node) SetPeerAlias(ctx context.Context, id identity.NodeID, alias string) error {
+	return n.store.SetPeerAlias(ctx, id, alias)
+}
+
+// RevokePeer marks a peer's trust as revoked. Inbound envelopes from the
+// peer are dropped; outbound sends return an error. The record is kept
+// so history remains inspectable.
+func (n *Node) RevokePeer(ctx context.Context, id identity.NodeID) error {
+	return n.store.RevokePeer(ctx, id)
+}
+
+// DeletePeer hard-removes the peer plus all threads, envelopes, and outbox
+// entries tied to that peer. Use when the user wants a full forget;
+// prefer RevokePeer to preserve history while cutting trust.
+func (n *Node) DeletePeer(ctx context.Context, id identity.NodeID) error {
+	return n.store.DeletePeer(ctx, id)
+}
+
 // OpenThread creates a new thread with the given peer.
 func (n *Node) OpenThread(ctx context.Context, peer identity.NodeID, topic string) (envelope.ThreadID, error) {
 	if _, err := n.store.GetPeer(ctx, peer); err != nil {

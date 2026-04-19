@@ -176,11 +176,15 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	d.last[env.From.NodeID] = now
 	d.mu.Unlock()
 
-	alias := env.From.Alias
+	// Prefer the store's local alias (the user may have renamed this peer via
+	// `clawdchan peer rename` or clawdchan_peer_rename) over the envelope's
+	// self-declared one. Fall back to envelope alias, then to a short hex.
+	alias := ""
+	if p, err := d.node.GetPeer(context.Background(), env.From.NodeID); err == nil && p.Alias != "" {
+		alias = p.Alias
+	}
 	if alias == "" {
-		if p, err := d.node.GetPeer(context.Background(), env.From.NodeID); err == nil && p.Alias != "" {
-			alias = p.Alias
-		}
+		alias = env.From.Alias
 	}
 	if alias == "" {
 		alias = hex.EncodeToString(env.From.NodeID[:4])

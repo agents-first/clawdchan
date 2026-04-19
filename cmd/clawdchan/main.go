@@ -80,6 +80,8 @@ func main() {
 		err = cmdConsume(args)
 	case "peers":
 		err = cmdPeers(args)
+	case "peer":
+		err = cmdPeer(args)
 	case "threads":
 		err = cmdThreads(args)
 	case "open":
@@ -125,6 +127,7 @@ Commands:
   pair      Generate a pairing code and wait for the peer
   consume   Enter a peer's pairing code
   peers     List paired peers
+  peer      Manage one peer: show | rename | revoke | remove
   threads   List conversation threads
   open      Open a new thread with a peer
   send      Send a message on a thread

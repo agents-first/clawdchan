@@ -26,6 +26,14 @@ type Store interface {
 	ListPeers(ctx context.Context) ([]pairing.Peer, error)
 	GetPeer(ctx context.Context, nodeID identity.NodeID) (pairing.Peer, error)
 	RevokePeer(ctx context.Context, nodeID identity.NodeID) error
+	// SetPeerAlias overrides the peer's display alias locally without
+	// touching the rest of the record. Returns ErrNotFound if the peer
+	// doesn't exist.
+	SetPeerAlias(ctx context.Context, nodeID identity.NodeID, alias string) error
+	// DeletePeer hard-removes the peer row plus any threads/envelopes/
+	// outbox entries tied to that peer. Use for full forget; prefer
+	// RevokePeer if you just want to stop trusting but keep history.
+	DeletePeer(ctx context.Context, nodeID identity.NodeID) error
 
 	CreateThread(ctx context.Context, t Thread) error
 	ListThreads(ctx context.Context) ([]Thread, error)
@@ -204,6 +212,46 @@ func (s *sqliteStore) GetPeer(ctx context.Context, nodeID identity.NodeID) (pair
 func (s *sqliteStore) RevokePeer(ctx context.Context, nodeID identity.NodeID) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE peers SET trust = ? WHERE node_id = ?`, int(pairing.TrustRevoked), nodeID[:])
 	return err
+}
+
+func (s *sqliteStore) SetPeerAlias(ctx context.Context, nodeID identity.NodeID, alias string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE peers SET alias = ? WHERE node_id = ?`, alias, nodeID[:])
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (s *sqliteStore) DeletePeer(ctx context.Context, nodeID identity.NodeID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Threads carry a peer FK via peer_id; envelopes are thread-scoped; the
+	// outbox is peer-keyed. Purge all three before dropping the peer row.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM envelopes WHERE thread_id IN (SELECT id FROM threads WHERE peer_id = ?)`, nodeID[:]); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM threads WHERE peer_id = ?`, nodeID[:]); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox WHERE peer_node = ?`, nodeID[:]); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM peers WHERE node_id = ?`, nodeID[:])
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *sqliteStore) CreateThread(ctx context.Context, t Thread) error {
