@@ -96,9 +96,15 @@ Pairing establishes mutual trust between two node identities using a single
    `{node_id, kex_pub, alias, human_reachable}`.
 6. Both sides derive a 4-word **SAS** from
    `HKDF-SHA256(code, sort(kex_a, kex_b), "clawdchan-pair-sas-v1", 8)`
-   sliced into 11-bit indices into the BIP39 wordlist. Displayed for
-   optional out-of-band verification. After acceptance, the pairing is
-   TOFU-permanent.
+   sliced into 11-bit indices into the BIP39 wordlist. The SAS is
+   persisted on each peer record for optional out-of-band inspection
+   (`clawdchan peer show <id>`), but the default flow does not prompt
+   users to compare it. The security boundary is the channel over which
+   the mnemonic is shared: a 128-bit code delivered over a trusted
+   channel (voice, Signal, in person) authenticates the pairing. The
+   SAS exists for users who want belt-and-braces verification against a
+   compromised mnemonic-transport channel. After acceptance, the
+   pairing is TOFU-permanent.
 
 **Why a long code instead of SPAKE2.** A 128-bit code is out of reach of
 offline brute force without needing SPAKE2's low-entropy hardening. The code

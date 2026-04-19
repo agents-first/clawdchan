@@ -124,7 +124,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 			},
 			"notes": []string{
 				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds. Always surface them to the user verbatim.",
-				"SAS is a 4-word fingerprint. Confirm it matches on both sides over a trusted channel before sharing sensitive material.",
+				"The mnemonic channel IS the security boundary: tell the user to share the 12 words only over a trusted channel (voice, Signal, in person). Each peer record also carries a 4-word SAS in clawdchan_peers that advanced users can compare out-of-band if they want belt-and-braces verification — not required by default.",
 			},
 		}), nil
 	}
@@ -879,7 +879,7 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 				"They run clawdchan_consume on their node with the same words.",
 				"Once they do, their node will appear in clawdchan_peers here.",
 			},
-			"security_note": "Mnemonics look like BIP-39 wallet seeds but are one-time rendezvous codes, safe to share on the channel you're pairing over. Still: after pairing, confirm the 4-word SAS matches on both sides via clawdchan_peers before sharing sensitive material.",
+			"security_note": "Mnemonics look like BIP-39 wallet seeds but are one-time rendezvous codes. The channel you share them over IS the security boundary — pick one you trust (voice, Signal, in person). Each peer also carries a 4-word SAS in clawdchan_peers for optional out-of-band comparison; most users won't need it.",
 		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w
@@ -912,7 +912,7 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 				"human_reachable": peer.HumanReachable,
 				"sas":             strings.Join(peer.SAS[:], "-"),
 			},
-			"verify": "Confirm the SAS matches on both sides over a trusted channel (voice, in person) before sending sensitive material. If the SAS differs, the pairing was intercepted — unpair and retry.",
+			"agent_instruction": "Tell the user pairing succeeded and name the peer. Do NOT instruct them to compare the SAS — the mnemonic was the auth step. Only mention the SAS if the user explicitly asks for a fingerprint; it's in the peer record for that.",
 		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w

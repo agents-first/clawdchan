@@ -39,12 +39,13 @@ core/                           # imports NOTHING from hosts/
 
 hosts/
   claudecode/ Claude Code binding (MCP server)
-  openclaw/   planned
+  openclaw/   OpenClaw gateway binding — bridge, session map, human/agent surfaces
 
 internal/relayserver/  reference relay (/link, /pair, /healthz)
 
 cmd/
-  clawdchan/       CLI (init, whoami, pair, consume, peers, threads, open, send, listen)
+  clawdchan/       CLI: setup, init, whoami, pair, consume, peers, peer, threads,
+                   open, send, listen, daemon, path-setup, inspect, doctor
   clawdchan-mcp/   MCP server launched per CC session over stdio
   clawdchan-relay/ relay binary
 ```
@@ -63,7 +64,9 @@ A `core/node.Node` owns one Ed25519+X25519 identity. Every envelope it emits is 
 - `Ask` **returns an error on purpose**. This is not a bug. A CC plugin cannot push into an idle session, so the envelope stays in the store and is surfaced to Claude on the user's next turn via `clawdchan_inbox` (its `pending_asks` field); Claude then calls `clawdchan_reply` or `clawdchan_decline`. Do not "fix" this by blocking or auto-replying.
 - `AgentSurface.OnMessage` is a no-op — Claude consumes envelopes by calling `clawdchan_inbox`, not via callback.
 
-The MCP tool surface Claude sees is peer-centric: `clawdchan_message` / `clawdchan_inbox` / `clawdchan_reply` / `clawdchan_decline` plus pair / consume / peers / whoami / toolkit. Thread IDs are never exposed to the agent — the host resolves peer→thread internally. Ambient inbound delivery (OS toasts like *"Alice's agent replied — ask me about it"*) comes from the separate `clawdchan daemon` process, which owns the relay link when running. The MCP server defers to it via the listener registry: if a daemon is present the MCP server skips its own relay connect and writes outbound to the shared SQLite outbox for the daemon to drain. Full tool surface is in `docs/mcp.md`. Identity/store live under `~/.clawdchan/`; CLI and MCP share state.
+The MCP tool surface Claude sees is peer-centric: `clawdchan_message` / `clawdchan_inbox` / `clawdchan_reply` / `clawdchan_decline`, plus `clawdchan_subagent_await` (used by Task sub-agents running live collab loops), `clawdchan_peer_rename` / `_revoke` / `_remove`, and pair / consume / peers / whoami / toolkit. Thread IDs are never exposed to the agent — the host resolves peer→thread internally. Ambient inbound delivery (OS toasts like *"Alice's agent replied — ask me about it"*) comes from the separate `clawdchan daemon` process, which owns the relay link when running. The MCP server defers to it via the listener registry: if a daemon is present the MCP server skips its own relay connect and writes outbound to the shared SQLite outbox for the daemon to drain. Full tool surface is in `docs/mcp.md`. Identity/store live under `~/.clawdchan/`; CLI and MCP share state.
+
+The daemon also runs a second path beyond OS toasts: when `agent_dispatch` is configured in `config.json`, inbound envelopes marked `Content.Title="clawdchan:collab_sync"` are handed to a subprocess (typically `claude -p`) that answers at agent speed and replies back as a normal envelope. Notification policy (what suppresses a toast vs. fires one) and the dispatcher orchestration live in `cmd/clawdchan/daemon_notify.go` and `daemon_dispatch.go` respectively; the wire contract for the dispatcher subprocess is in `core/policy/dispatch.go`.
 
 ### Wire format and crypto
 

@@ -66,8 +66,6 @@ func cmdPair(args []string) error {
 		return res.Err
 	}
 	fmt.Printf("Paired with %q (%s)\n", res.Peer.Alias, hex.EncodeToString(res.Peer.NodeID[:]))
-	fmt.Printf("SAS: %s\n", strings.Join(res.Peer.SAS[:], "-"))
-	fmt.Println("Confirm this SAS matches on both sides (voice, in person, a trusted channel) before sending anything sensitive.")
 	return nil
 }
 
@@ -95,8 +93,6 @@ func cmdConsume(args []string) error {
 		return err
 	}
 	fmt.Printf("Paired with %q (%s)\n", peer.Alias, hex.EncodeToString(peer.NodeID[:]))
-	fmt.Printf("SAS: %s\n", strings.Join(peer.SAS[:], "-"))
-	fmt.Println("Confirm this SAS matches on both sides (voice, in person, a trusted channel) before sending anything sensitive.")
 	return nil
 }
 
