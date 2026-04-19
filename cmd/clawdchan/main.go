@@ -92,6 +92,8 @@ func main() {
 		err = cmdDaemon(args)
 	case "path-setup":
 		err = cmdPathSetup(args)
+	case "setup":
+		err = cmdSetup(args)
 	case "inspect":
 		err = cmdInspect(args)
 	case "doctor":
@@ -117,7 +119,8 @@ Usage:
   clawdchan <command> [args]
 
 Commands:
-  init      Create config and identity
+  setup     One-command onboarding: init + PATH + daemon (interactive)
+  init      Create config and identity (non-interactive)
   whoami    Print this node's id and alias
   pair      Generate a pairing code and wait for the peer
   consume   Enter a peer's pairing code

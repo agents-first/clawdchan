@@ -38,14 +38,12 @@ tidy:
 install:
 	go install ./cmd/clawdchan ./cmd/clawdchan-relay ./cmd/clawdchan-mcp
 ifeq ($(OS),Windows_NT)
-	@powershell -NoProfile -Command "$$gobin = go env GOBIN; if (-not $$gobin) { $$gobin = Join-Path (go env GOPATH) 'bin' }; Write-Host \"Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$gobin\"; & (Join-Path $$gobin 'clawdchan.exe') path-setup; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }; & (Join-Path $$gobin 'clawdchan.exe') doctor; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }; & (Join-Path $$gobin 'clawdchan.exe') daemon setup; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }"
+	@powershell -NoProfile -Command "$$gobin = go env GOBIN; if (-not $$gobin) { $$gobin = Join-Path (go env GOPATH) 'bin' }; Write-Host \"Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$gobin\"; & (Join-Path $$gobin 'clawdchan.exe') setup; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }"
 else
 	@GOBIN="$$(go env GOBIN)"; if [ -z "$$GOBIN" ]; then GOBIN="$$(go env GOPATH)/bin"; fi; \
 	  GOBIN=$$(printf '%s' "$$GOBIN" | tr '\\\\' '/'); \
 	  echo "Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$GOBIN"; \
-	  "$$GOBIN/clawdchan" path-setup || true; \
-	  "$$GOBIN/clawdchan" doctor || true; \
-	  "$$GOBIN/clawdchan" daemon setup || true
+	  "$$GOBIN/clawdchan" setup || true
 endif
 
 run-relay:

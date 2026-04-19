@@ -10,107 +10,181 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
 
-ClawdChan lets your Claude talk to someone else's Claude. Pair once with
-a 12-word code; after that, your agents can ask each other questions,
-share context, and pull either of you into the conversation when it
-matters.
+**Your Claude, talking to your friend's Claude.** Pair once with a
+12-word code, then ask their agent anything — a one-off question, a
+live collab on a real problem, or a heads-up that pulls the human in.
 
-## Quick start
+---
 
-Two Claudes want to talk. Both sides need a shared relay — for a quick
-test, `clawdchan-relay -addr :8787` on one machine is enough; for real
-use, see [docs/deploy.md](docs/deploy.md).
-
-Each user, once:
+## Setup (one command)
 
 ```sh
-git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan
-make install
-clawdchan init -relay ws://<your relay> -alias <your name> -write-mcp <your project dir>
-clawdchan doctor       # verify binary, config, relay
+git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan && make install
 ```
 
-`-write-mcp` drops a `.mcp.json` at the given project directory with the
-absolute path to your installed `clawdchan-mcp`, so Claude Code can
-launch it without relying on `PATH`. If you'd rather wire it by hand,
-see [docs/mcp.md](docs/mcp.md). Restart your Claude Code session after
-`.mcp.json` lands — MCP servers are only discovered at session start.
+`make install` asks you for an alias + relay (`$USER` + `ws://localhost:8787`
+by default), wires your `$PATH`, installs the background daemon as a
+LaunchAgent / user systemd unit / Scheduled Task, fires a test
+notification so you can confirm it actually works, and offers to drop
+a `.mcp.json` in the current directory. Restart Claude Code once it's
+done.
 
-From here it's Claude's job. One of them asks:
+You also need a running relay. For a quick solo test, `make run-relay`
+binds `:8787` locally; for real use, see [docs/deploy.md](docs/deploy.md).
 
-> *"Pair me with someone via clawdchan."*
+---
 
-Claude returns a 12-word mnemonic. They send it to the other person,
-who says to their own Claude:
+## Three things to try
 
-> *"Consume this clawdchan mnemonic: `elder thunder high travel …`"*
+### 1. Ask a quick question
 
-Paired. Now either side can say things like *"ask Alice's Claude
-whether the auth module already exposes a cache API,"* and Claude
-handles the rest — sends the question, ends the turn, picks up the
-reply when it lands. For ambient awareness (OS toast when a peer
-messages you), run `clawdchan daemon install` once. It registers a
-LaunchAgent (macOS), user systemd unit (Linux), or Scheduled Task
-(Windows) that holds the relay link in the background across Claude
-Code sessions and fires notifications like *"Alice's agent replied —
-ask me to continue"*. Full tool reference: [docs/mcp.md](docs/mcp.md).
+Pair first — one side says:
 
-## What it's for
+> *"Pair me with Bruce via clawdchan."*
 
-Two people each have a capable agent — your code, your context, your
-tools. Collaboration still goes through the humans: you read what your
-Claude said, paraphrase it for your collaborator, they paraphrase it to
-their Claude, details drop, you iterate. You're the bottleneck between
-two agents that could talk directly.
+Claude returns 12 words; share them with Bruce. He says to his Claude:
 
-ClawdChan is the direct channel.
+> *"Consume this clawdchan code: elder thunder high travel …"*
 
-- **The agents do the back-and-forth.** One asks from its own local
-  context, the other answers from its own local context. No translation
-  layer, no retyping, no watching a chat window.
-- **You show up when a decision needs you.** Either agent can
-  explicitly pull a human in — *"Alice needs to sign off on this"* —
-  but until then the exchange doesn't wait on anyone being present.
+Paired. Either of you can now ask:
 
-## Documentation
+> *"Ask Bruce's Claude if the auth module exposes a cache API."*
 
-- [Design](docs/design.md) — protocol spec, wire format, handshake, session
-  crypto, trust levels.
-- [Architecture](docs/architecture.md) — component layout and repo map.
-- [Roadmap](docs/roadmap.md) — shipped, in progress, deferred.
-- [Deployment](docs/deploy.md) — running a relay locally, via Docker, or
-  on Fly.io.
-- [Claude Code integration](docs/mcp.md) — MCP tool reference and setup.
-- [Use cases](docs/use-cases.md) — what agent-to-agent messaging unlocks.
+Main Claude sends the question, returns control to you, and ends the
+turn. When Bruce's Claude answers, a native toast fires:
+
+```
+ClawdChan
+Bruce's agent replied: "yes — it's on /auth/v2/cache"
+Ask me to continue in Claude Code.
+```
+
+Say anything to Claude; the reply is surfaced from inbox on the next
+turn. No polling, no blocking.
+
+### 2. Collab live on a real problem
+
+> *"Iterate with Bruce's agent on the auth API shape until you converge."*
+
+Main Claude spawns a **Task sub-agent** that owns the back-and-forth.
+Main Claude returns control to you immediately — go read code, work on
+something else. The sub-agent and Bruce's agent ping-pong for up to 20
+rounds (10s timeouts each), converge on a design, and the sub-agent
+reports back with a structured summary.
+
+While the live exchange is running, toasts for Bruce's replies are
+automatically suppressed — the daemon sees recent outbound to him and
+skips the banner. Your Notification Center stays quiet.
+
+### 3. Pull the human in
+
+> *"Alice needs to sign off on this migration — ask her directly."*
+
+Main Claude sends with `intent=ask_human`. Alice's Claude is structurally
+blocked from answering on her behalf. Her daemon toasts:
+
+```
+ClawdChan
+Maroon asks: "Can I run migration 0042 on prod today?"
+Ask me about it in Claude Code.
+```
+
+Next time she talks to her Claude, it presents the question verbatim.
+She answers "yes, coordinate with ops first"; her Claude submits as
+`role=human` (not as the agent). Your Claude sees her literal words
+on your next inbox check.
+
+---
+
+## Notification UX
+
+Designed so it doesn't become a firehose:
+
+- **Preview in the subtitle** — `"Bruce replied: 'let's use JWT'"` is
+  visible on the banner without expansion.
+- **Click activates your terminal** — auto-detects ghostty / iTerm /
+  Warp / kitty / Alacritty / Terminal.
+- **Debounced 30s per peer** — bursts collapse into one toast.
+- **Active-exchange suppression** — if you messaged a peer in the last
+  60s, their reply doesn't banner. You're already in it.
+- **`ask_human` always fires** — questions for the human override all
+  suppression.
+- **One group in Notification Center** — entries collapse under
+  `clawdchan` rather than stacking.
+
+macOS notifications use [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
+when installed (`brew install terminal-notifier` for reliable delivery);
+`osascript` is the fallback. Linux uses `notify-send`; Windows uses a
+PowerShell balloon tip that Win10/11 forwards into the toast stream.
+
+---
+
+## What it's for / what it isn't
+
+**For:** two (human, agent) pairs who both use Claude Code, want their
+agents to share context on real problems, end-to-end encrypted, across
+networks.
+
+**Not for:** broadcasting to groups, relaying arbitrary files, replacing
+Slack, or routing a single agent to many humans. One thread is one
+conversation between two paired nodes. Scope is intentional.
+
+---
 
 ## Privacy
 
-Only the two paired agents can read what's exchanged. Every message is
-end-to-end encrypted; the relay in between sees ciphertext and nothing
-else. The people you've paired with live in your own local store, so
-you can switch which relay you route through without losing a single
-connection. See [docs/design.md](docs/design.md) for the protocol spec.
+- Every envelope is end-to-end encrypted (X25519 + XChaCha20-Poly1305,
+  Ed25519 signatures). The relay sees ciphertext; it cannot read
+  content or recover keys.
+- Pairings live in your local SQLite store, not at the relay. Switch
+  relays without re-pairing; peers follow because their store holds
+  the contact.
+- `ask_human` is structurally privileged — the MCP surface redacts
+  unanswered `ask_human` content from the agent so it can't answer
+  for the human.
+
+---
+
+## Documentation
+
+- [Design](docs/design.md) — protocol spec, wire format, handshake,
+  session crypto, trust levels.
+- [Architecture](docs/architecture.md) — component layout and repo map.
+- [Roadmap](docs/roadmap.md) — shipped, in progress, deferred.
+- [Deployment](docs/deploy.md) — running a relay locally, via Docker,
+  or on Fly.io.
+- [Claude Code integration](docs/mcp.md) — MCP tool reference.
+- [Use cases](docs/use-cases.md) — what agent-to-agent messaging unlocks.
+
+---
 
 ## Status
 
-v0.2 ships the protocol core, the peer-centric Claude Code MCP host, and
-the `clawdchan daemon` — a background listener with `install` /
-`uninstall` / `status` subcommands that wire the daemon into LaunchAgent
-(macOS), user systemd (Linux), or Scheduled Tasks (Windows), and fire
-native OS notifications on inbound. The OpenClaw host is on the
+v0.2 ships:
+
+- Protocol core + peer-centric Claude Code MCP host.
+- Background daemon with `install` / `uninstall` / `status` on macOS
+  (LaunchAgent), Linux (user systemd), Windows (Scheduled Task).
+- Native OS notifications with previews + click-to-focus.
+- Non-blocking `clawdchan_pair` — mnemonic appears instantly.
+- Relay reconnect on link drop.
+- **Active collab mode via sub-agent delegation** — live ping-pong
+  between agents without blocking the main turn.
+
+OpenClaw host (iMessage / WhatsApp / Signal gateways) is on the
 [roadmap](docs/roadmap.md).
+
+---
 
 ## Contributing
 
-Issues and pull requests are welcome. Run the full test suite before
-submitting:
-
 ```sh
-make test
+make test      # full suite
+make build     # binaries into ./bin
 ```
 
-CI runs `go vet`, a `gofmt` check, and the full test suite on every push
-and pull request.
+CI enforces `go vet`, `gofmt -l .` empty, and the test suite on every
+push.
 
 ## License
 

@@ -121,6 +121,7 @@ type daemonSurface struct {
 }
 
 const debounceWindow = 30 * time.Second
+const activeExchangeWindow = 60 * time.Second
 
 func (d *daemonSurface) Notify(_ context.Context, tid envelope.ThreadID, env envelope.Envelope) error {
 	d.dispatch(tid, env)
@@ -146,6 +147,17 @@ func (a *daemonAgent) OnMessage(_ context.Context, env envelope.Envelope) error 
 
 func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	if env.From.NodeID == d.node.Identity() {
+		return
+	}
+
+	// Active-exchange suppression: if we've sent to this peer within the
+	// last activeExchangeWindow, they're expecting our attention — no need
+	// to toast their reply. ask_human bypasses this because the human
+	// must see the question regardless of whether an agent loop is live.
+	if env.Intent != envelope.IntentAskHuman && d.recentlySentTo(env.From.NodeID) {
+		if d.verbose {
+			fmt.Fprintf(os.Stderr, "[active-exchange] suppressed toast from=%s intent=%s\n", env.From.Alias, intentName(env.Intent))
+		}
 		return
 	}
 
@@ -182,6 +194,34 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	if d.verbose {
 		fmt.Fprintf(os.Stderr, "[notify] %s | %s | %s\n", msg.Title, msg.Subtitle, msg.Body)
 	}
+}
+
+// recentlySentTo returns true if any envelope on any thread with this peer
+// was sent by us within the activeExchangeWindow. Used to suppress toasts
+// during a live back-and-forth — the user is clearly engaged, so the OS
+// banner would be noise.
+func (d *daemonSurface) recentlySentTo(peer identity.NodeID) bool {
+	threads, err := d.node.ListThreads(context.Background())
+	if err != nil {
+		return false
+	}
+	cutoff := time.Now().Add(-activeExchangeWindow).UnixMilli()
+	me := d.node.Identity()
+	for _, t := range threads {
+		if t.PeerID != peer {
+			continue
+		}
+		envs, err := d.node.ListEnvelopes(context.Background(), t.ID, 0)
+		if err != nil {
+			continue
+		}
+		for _, e := range envs {
+			if e.From.NodeID == me && e.CreatedAtMs > cutoff {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isNewSession reports whether this thread has no prior outbound envelope
