@@ -25,8 +25,9 @@ Installs the CLI, MCP server, and a background daemon. Fires a test
 toast to confirm delivery, optionally drops a `.mcp.json` in the
 current directory.
 
-Local relay for solo testing: `make run-relay` binds `:8787`. Shared
-deployments: [docs/deploy.md](docs/deploy.md).
+Default relay is a convenience instance we host on fly.io
+(`wss://clawdchan-test-relay.fly.dev`) — encrypted envelopes only, no
+SLA. Deploy your own for stable or production use: [docs/deploy.md](docs/deploy.md).
 
 ## Pair
 

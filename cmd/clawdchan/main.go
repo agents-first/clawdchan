@@ -52,6 +52,13 @@ type config struct {
 
 const configFileName = "config.json"
 
+// defaultPublicRelay is the convenience relay vMaroon hosts on fly.io so
+// users can get started without deploying their own. It's best-effort, has
+// no SLA, and sees ciphertext only — but for first-time setup and casual
+// use it saves the "run a server first" step. Deploy your own for stable
+// or production use; see docs/deploy.md.
+const defaultPublicRelay = "wss://clawdchan-test-relay.fly.dev"
+
 func defaultDataDir() string {
 	if v := os.Getenv("CLAWDCHAN_HOME"); v != "" {
 		return v
@@ -190,7 +197,7 @@ func openNode(ctx context.Context, c config) (*node.Node, error) {
 func cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	dataDir := fs.String("data", defaultDataDir(), "data directory (holds config and sqlite store)")
-	relay := fs.String("relay", "ws://localhost:8787", "relay URL (ws:// or wss://)")
+	relay := fs.String("relay", defaultPublicRelay, "relay URL (ws:// or wss://)")
 	alias := fs.String("alias", "", "display alias sent during pairing")
 	writeMCP := fs.String("write-mcp", "", "also write a .mcp.json at this directory wired to this install's absolute clawdchan-mcp path")
 	fs.Parse(args)

@@ -64,31 +64,32 @@ func cmdSetup(args []string) error {
 }
 
 // setupInit runs the first-time init: prompts for alias + relay with
-// defaults ($USER and ws://localhost:8787), creates the data dir, saves
-// config, generates the Ed25519 + X25519 identity.
+// defaults ($USER and the vMaroon-hosted fly.io convenience relay),
+// creates the data dir, saves config, generates the Ed25519 + X25519
+// identity.
 func setupInit(yes bool) error {
 	defaultAlias := os.Getenv("USER")
 	if defaultAlias == "" {
 		defaultAlias = "me"
 	}
-	defaultRelay := "ws://localhost:8787"
 
 	alias := defaultAlias
-	relay := defaultRelay
+	relay := defaultPublicRelay
 
 	if !yes && stdinIsTTY() {
 		fmt.Println()
 		fmt.Println("First-time ClawdChan setup.")
 		fmt.Println("An alias is how you appear to peers when pairing. The relay is the server")
-		fmt.Println("that forwards encrypted envelopes between your node and theirs.")
+		fmt.Println("that forwards encrypted envelopes between your node and theirs. The default")
+		fmt.Println("is a convenience relay we host on fly.io — it sees ciphertext only, but has")
+		fmt.Println("no SLA. For stable or production use, deploy your own (docs/deploy.md).")
 		fmt.Println()
 		alias = promptString(fmt.Sprintf("Display alias [%s]: ", defaultAlias), defaultAlias)
-		relay = promptString(fmt.Sprintf("Relay URL [%s]: ", defaultRelay), defaultRelay)
+		relay = promptString(fmt.Sprintf("Relay URL [%s]: ", defaultPublicRelay), defaultPublicRelay)
 		if strings.Contains(relay, "localhost") || strings.Contains(relay, "127.0.0.1") {
 			fmt.Println()
-			fmt.Println("Note: you picked a localhost relay. That's fine for a solo test,")
-			fmt.Println("but peers on other machines can't reach it. Deploy a shared relay")
-			fmt.Println("(see docs/deploy.md) once you want to pair with someone else.")
+			fmt.Println("Note: you picked a localhost relay. Peers on other machines can't reach")
+			fmt.Println("it. Use the default public relay or deploy your own (docs/deploy.md).")
 		}
 	}
 
