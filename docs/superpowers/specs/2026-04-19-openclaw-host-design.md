@@ -22,8 +22,9 @@ This spec covers the OpenClaw↔OpenClaw case *and* the mixed CC↔OpenClaw case
 - No agent-facing tool surface on OpenClaw (pairing stays CLI-only).
 - No remote OpenClaw support — v1 requires OpenClaw and `clawdchan daemon`
   on the **same machine**, connected over `ws://localhost:…`.
-- No composition with the CC host on the same machine (mutually exclusive
-  per machine in v1).
+- No composition of *two human surfaces* per machine — the daemon owns
+  whichever one is active. CC's MCP server still runs alongside as an
+  outbox writer; pairing and `clawdchan_inbox` continue to work.
 - No per-peer `agents.create` — one OpenClaw *session* per peer only.
 - No multi-ask correlation: if more than one `AskHuman` is pending on a
   thread simultaneously, the next assistant turn resolves whichever ask
@@ -301,12 +302,18 @@ Two operating modes, mutually documented:
 
 ### Coexistence with CC on the same machine (v1 decision)
 
-Mutually exclusive per machine. If `clawdchan daemon run -openclaw …` is
-active, the CC MCP server falls back to its existing "outbox-writer only"
-mode (`CLAUDE.md:67-70`) — it still launches per CC session, but it
-doesn't register a human surface. The daemon's OpenClaw surfaces own the
-node. We document: pick one host per machine. Composite surfaces are a
-future concern.
+CC and OpenClaw coexist — ClawdChan does **not** replace any Claude Code
+configuration. The daemon owns the node (relay link, store, human/agent
+surfaces). The CC MCP server, when spawned per session, detects the
+daemon via the listener registry and runs in outbox-writer mode
+(`CLAUDE.md:67-70`): it writes outbound envelopes into the shared SQLite
+outbox for the daemon to drain, and it still serves the peer-centric
+tool surface (`clawdchan_inbox`, `clawdchan_reply`, …) so Claude can
+read and respond to pending asks. When `-openclaw` is set on the daemon,
+its OpenClaw surfaces handle the human-facing side too — OS
+notifications and OpenClaw session delivery happen together, not as an
+either/or. Users who want to turn OpenClaw off pass
+`-openclaw-url=none` to `clawdchan setup` (or just skip the prompt).
 
 ## Core changes
 
