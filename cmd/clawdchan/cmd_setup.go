@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -99,6 +100,21 @@ func cmdSetup(args []string) error {
 		fmt.Println("  3. OpenClaw config changed — restart the daemon to pick it up:")
 		fmt.Println("     clawdchan daemon install -force")
 	}
+	// OpenClaw hub guide — printed in addition to the Claude Code steps above
+	// so existing users don't lose the short notice, and new OpenClaw users
+	// see how to drive the hub from natural language.
+	if c, _ := loadConfig(); c.OpenClawURL != "" {
+		fmt.Println()
+		fmt.Println("  OpenClaw:")
+		fmt.Println("    1. Restart the OpenClaw gateway so it sees the new agent:")
+		fmt.Println("         openclaw gateway restart")
+		fmt.Println("    2. Open OpenClaw — you'll see a session named \"clawdchan:hub\".")
+		fmt.Println("    3. To start a pairing, just say: \"pair me with someone on clawdchan\".")
+		fmt.Println("       Your agent replies with 12 words. Send them to your friend.")
+		fmt.Println("    4. When your friend pastes their 12 words, say: \"consume these: <words>\".")
+		fmt.Println("    5. A new session for that peer appears automatically — talk there to chat.")
+		fmt.Println("    Other things you can say in the hub: \"who am I paired with\", \"any new messages\".")
+	}
 	return nil
 }
 
@@ -153,34 +169,72 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
 		return nil
 	}
 
-	// -y with no flags: leave it as-is.
+	// -y with no flags: auto-discover if nothing configured, else keep.
 	if yes || !stdinIsTTY() {
 		if c.OpenClawURL != "" {
 			fmt.Printf("[ok] OpenClaw gateway: %s (unchanged)\n", c.OpenClawURL)
+			return nil
+		}
+		ws, tok, _ := discoverOpenClaw(context.Background())
+		if ws != "" {
+			c.OpenClawURL = ws
+			c.OpenClawToken = tok
+			if c.OpenClawDeviceID == "" {
+				c.OpenClawDeviceID = "clawdchan-daemon"
+			}
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+			fmt.Printf("[ok] OpenClaw auto-discovered: %s (device=%s)\n", ws, c.OpenClawDeviceID)
 		}
 		return nil
 	}
 
-	// Interactive: short prompt. Explain only if the user opts in — the
-	// setup is re-run often and the paragraph-before-Y/N got grating.
+	// Interactive: try auto-discovery first, fall back to manual.
+	fmt.Println()
 	if c.OpenClawURL != "" {
 		fmt.Printf("  OpenClaw gateway configured: %s\n", c.OpenClawURL)
 		ok, err := promptYN("  Reconfigure or disable? [y/N]: ", false)
 		if err != nil || !ok {
 			return nil
 		}
-	} else {
-		ok, err := promptYN("  Configure OpenClaw gateway? [y/N]: ", false)
-		if err != nil || !ok {
-			fmt.Println("  (not configured)")
-			return nil
-		}
-		fmt.Println("  OpenClaw routes inbound envelopes into OpenClaw sessions alongside Claude Code.")
-		fmt.Println("  Your Claude Code setup is NOT touched either way.")
 	}
 
-	url := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
-	if strings.EqualFold(url, "none") || url == "" {
+	fmt.Print("Checking for OpenClaw gateway... ")
+	ws, tok, _ := discoverOpenClaw(context.Background())
+	if ws != "" {
+		fmt.Printf("found at %s\n", ws)
+		ok, err := promptYN("Use auto-detected gateway? [Y/n]: ", true)
+		if err == nil && ok {
+			c.OpenClawURL = ws
+			c.OpenClawToken = tok
+			if c.OpenClawDeviceID == "" {
+				c.OpenClawDeviceID = "clawdchan-daemon"
+			}
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+			fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", ws, c.OpenClawDeviceID)
+			return nil
+		}
+		// User declined auto-detect — fall through to manual.
+	} else {
+		fmt.Println("not found.")
+	}
+
+	fmt.Println("OpenClaw integration (optional) — routes inbound envelopes into")
+	fmt.Println("OpenClaw sessions alongside Claude Code.")
+	fmt.Println("Your existing Claude Code setup is NOT touched either way.")
+	ok, err := promptYN("Configure OpenClaw manually? [y/N]: ", false)
+	if err != nil || !ok {
+		if c.OpenClawURL == "" {
+			fmt.Println("Skipped. The daemon will auto-detect at startup if available.")
+		}
+		return nil
+	}
+
+	ocURL := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
+	if strings.EqualFold(ocURL, "none") || ocURL == "" {
 		c.OpenClawURL = ""
 		c.OpenClawToken = ""
 		c.OpenClawDeviceID = ""
@@ -197,13 +251,13 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
 	}
 	device := promptString(fmt.Sprintf("Device id [%s]: ", defaultDevice), defaultDevice)
 
-	c.OpenClawURL = url
+	c.OpenClawURL = ocURL
 	c.OpenClawToken = token
 	c.OpenClawDeviceID = device
 	if err := saveConfig(c); err != nil {
 		return err
 	}
-	fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", url, device)
+	fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", ocURL, device)
 	return nil
 }
 
