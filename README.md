@@ -18,23 +18,15 @@ the conversation routes back to them.
 ## Install
 
 ```sh
-git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan && make install
+git clone https://github.com/vMaroon/ClawdChan
+cd ClawdChan
+make install
 ```
 
-Installs the CLI, MCP server, and a background daemon. Fires a test
-toast to confirm delivery, optionally drops a `.mcp.json` in the
-current directory. If you run an OpenClaw gateway on the same
-machine, `setup` will offer to wire it in — Claude Code config is
-never touched either way.
+A five-step interactive setup walks you through identity, Claude Code
+wiring, and a background daemon that fires OS banners on inbound.
 
-```sh
-# Scripted: configure OpenClaw without a prompt
-make install-openclaw OPENCLAW_URL=wss://localhost:7777 OPENCLAW_TOKEN=dev
-```
-
-Default relay is a convenience instance we host on fly.io
-(`wss://clawdchan-test-relay.fly.dev`) — encrypted envelopes only, no
-SLA. Deploy your own for stable or production use: [docs/deploy.md](docs/deploy.md).
+The default relay is a fly.io instance we run. You can deploy your own: [docs/deploy.md](docs/deploy.md).
 
 ## Pair
 
@@ -42,7 +34,8 @@ Phrased as prompts to Claude; the MCP server maps them to tool calls.
 
 ```
 > Pair me with Sam via clawdchan.
-  → 12 BIP39 words. Send to Sam over any side channel.
+  → 12 BIP39 words. Send to Sam over a trusted channel (voice,
+    Signal, in person) — that channel is the security boundary.
 
 > Consume this clawdchan code: elder thunder high travel …
   → paired.
@@ -87,9 +80,9 @@ from the agent surface until the human answers — no impersonation.
 
 Two paired (human, agent) pairs, one thread per peer, across networks.
 Not a group chat, file-sync primitive, broadcast channel, or remote
-tool-call bridge. OpenClaw (iMessage / WhatsApp / Signal host for the
-non-Claude side) now ships as an optional mode — see
-[docs/openclaw.md](docs/openclaw.md).
+tool-call bridge. An optional [OpenClaw gateway mode](docs/openclaw.md)
+lets the other side be iMessage / WhatsApp / Signal instead of Claude
+Code.
 
 ## Docs
 

@@ -1,4 +1,4 @@
-.PHONY: all build test lint tidy clean install install-openclaw install-binaries run-relay help
+.PHONY: all build test lint tidy clean install install-openclaw install-binaries install-deps run-relay help
 
 BIN := ./bin
 CMDS := clawdchan clawdchan-relay clawdchan-mcp
@@ -20,14 +20,17 @@ endif
 all: build
 
 help:
-	@echo "Targets:"
+	@echo "Everyday:"
 	@echo "  build             Build all binaries into ./bin"
 	@echo "  test              Run the full test suite"
 	@echo "  tidy              go mod tidy"
-	@echo "  install           Interactive setup: binaries + PATH + OpenClaw? + daemon"
-	@echo "  install-openclaw  Scripted: install + configure OpenClaw from env vars"
-	@echo "                    (OPENCLAW_URL=... OPENCLAW_TOKEN=... [OPENCLAW_DEVICE_ID=...])"
-	@echo "  install-binaries  Install binaries only — no prompts, no service install"
+	@echo ""
+	@echo "Install:"
+	@echo "  install           Interactive setup: binaries + macOS deps + PATH + daemon"
+	@echo "  install-binaries  go install the binaries only — no prompts, no service"
+	@echo "  install-openclaw  Scripted OpenClaw wiring (OPENCLAW_URL=... [OPENCLAW_TOKEN=...])"
+	@echo ""
+	@echo "Ops:"
 	@echo "  run-relay         Run a local relay on :8787"
 	@echo "  clean             Remove ./bin"
 
@@ -48,11 +51,36 @@ tidy:
 install-binaries:
 	go install ./cmd/clawdchan ./cmd/clawdchan-relay ./cmd/clawdchan-mcp
 
-# install is the default UX: go install + interactive setup. Re-running is
-# idempotent — existing Claude Code config and MCP wiring are preserved, we
-# only add what's missing. OpenClaw is asked about inside setup; skipping
-# leaves config untouched.
-install: install-binaries
+# install-deps installs optional OS-level helpers the daemon likes having.
+# Today: macOS `terminal-notifier` (osascript-attributed banners often get
+# silently dropped on recent macOS, terminal-notifier registers its own
+# bundle and behaves). Linux / Windows: noop.
+install-deps:
+	@if [ "$$(uname 2>/dev/null)" != "Darwin" ]; then exit 0; fi; \
+	if command -v terminal-notifier >/dev/null 2>&1; then \
+	  echo "[ok] terminal-notifier present ($$(command -v terminal-notifier))"; \
+	  exit 0; \
+	fi; \
+	if ! command -v brew >/dev/null 2>&1; then \
+	  echo "[warn] terminal-notifier missing (macOS banners may drop); brew not found — install manually"; \
+	  exit 0; \
+	fi; \
+	if [ ! -t 0 ]; then \
+	  echo "[warn] terminal-notifier missing; run: brew install terminal-notifier"; \
+	  exit 0; \
+	fi; \
+	printf 'terminal-notifier is recommended on macOS (osascript banners are often dropped).\nInstall via `brew install terminal-notifier`? [Y/n] '; \
+	read ans; \
+	case "$$ans" in \
+	  n|N|no|NO) echo "[skipped] install later: brew install terminal-notifier" ;; \
+	  *) brew install terminal-notifier ;; \
+	esac
+
+# install is the default UX: go install + macOS deps + interactive setup.
+# Re-running is idempotent — existing Claude Code config and MCP wiring
+# are preserved, we only add what's missing. OpenClaw is asked about
+# inside setup; skipping leaves config untouched.
+install: install-binaries install-deps
 ifeq ($(OS),Windows_NT)
 	@powershell -NoProfile -Command "$$gobin = go env GOBIN; if (-not $$gobin) { $$gobin = Join-Path (go env GOPATH) 'bin' }; Write-Host \"Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$gobin\"; & (Join-Path $$gobin 'clawdchan.exe') setup; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }"
 else

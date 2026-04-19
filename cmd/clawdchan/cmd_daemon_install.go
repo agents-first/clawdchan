@@ -37,57 +37,44 @@ func daemonSetup(args []string) error {
 	fs.Parse(args)
 
 	if _, err := loadConfig(); err != nil {
-		fmt.Println("ClawdChan is not initialized yet — run `clawdchan init` first, then rerun `make install` to set up the daemon.")
+		fmt.Println("  ClawdChan is not initialized yet — run `clawdchan init` first, then rerun `make install`.")
 		return nil
 	}
 
 	if daemonAlreadyInstalled() {
-		fmt.Println("ClawdChan daemon is already installed. Skipping setup.")
-		fmt.Println("(Remove with `clawdchan daemon uninstall`, check state with `clawdchan daemon status`.)")
+		fmt.Println("  [ok] already installed. Remove with `clawdchan daemon uninstall`, inspect with `clawdchan daemon status`.")
+		if !*yes && stdinIsTTY() {
+			redo, _ := promptYN("  Reinstall (recreate service, fire a fresh test notification)? [y/N]: ", false)
+			if redo {
+				return daemonInstall([]string{"-force"})
+			}
+		}
 		return nil
 	}
 
-	fmt.Println()
-	fmt.Println("ClawdChan daemon — install as a background service?")
-	fmt.Println()
-	fmt.Println("The daemon holds a persistent relay link for your node so peers can")
-	fmt.Println("reach you even when no Claude Code session is open. When a peer")
-	fmt.Println("messages you, it fires a native OS notification like")
-	fmt.Println(`  "Alice's agent replied — ask me to continue."`)
-	fmt.Println("and you resume by saying anything to Claude.")
-	fmt.Println()
+	fmt.Println("  Holds a persistent relay link so peers can reach you when no")
+	fmt.Println("  Claude Code session is open; fires an OS banner on inbound.")
 	switch runtime.GOOS {
 	case "darwin":
-		fmt.Println("This will:")
-		fmt.Println("  - write ~/Library/LaunchAgents/" + launchdLabel + ".plist")
-		fmt.Println("  - start the daemon under launchd (auto-starts at each login)")
-		fmt.Println("  - log to ~/Library/Logs/clawdchan-daemon.log")
-		fmt.Println("  - fire a test notification (macOS may ask you to allow osascript)")
+		fmt.Println("  Will write ~/Library/LaunchAgents/" + launchdLabel + ".plist and start under launchd.")
+		fmt.Println("  Logs: ~/Library/Logs/clawdchan-daemon.log. Test notification fires on install.")
 	case "linux":
-		fmt.Println("This will:")
-		fmt.Println("  - write ~/.config/systemd/user/" + systemdUnit)
-		fmt.Println("  - run `systemctl --user enable --now " + systemdUnit + "`")
-		fmt.Println("  - auto-start at login; logs via `journalctl --user -u " + systemdUnit + "`")
+		fmt.Println("  Will write ~/.config/systemd/user/" + systemdUnit + " and enable it.")
+		fmt.Println("  Logs: `journalctl --user -u " + systemdUnit + "`.")
 	case "windows":
-		fmt.Println("This will:")
-		fmt.Println("  - create a Scheduled Task \"" + windowsTaskName + "\" (no admin needed)")
-		fmt.Println("  - trigger at each user logon under your account")
-		fmt.Println("  - start the daemon now")
+		fmt.Println("  Will create Scheduled Task \"" + windowsTaskName + "\" (no admin needed), triggered at each user logon.")
 	default:
-		fmt.Println("This platform does not support automatic install — skipping.")
+		fmt.Println("  This platform does not support automatic install — skipping.")
 		return nil
 	}
-	fmt.Println()
-	fmt.Println("Remove any time with `clawdchan daemon uninstall`.")
-	fmt.Println()
 
 	if !*yes {
-		ok, err := promptYN("Install the daemon now? [Y/n]: ", true)
+		ok, err := promptYN("  Install the daemon now? [Y/n]: ", true)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			fmt.Println("Skipped. Run `clawdchan daemon install` any time.")
+			fmt.Println("  Skipped. Run `clawdchan daemon install` any time.")
 			return nil
 		}
 	}

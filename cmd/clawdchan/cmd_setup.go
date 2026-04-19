@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -34,7 +33,12 @@ func cmdSetup(args []string) error {
 	openClawDeviceID := fs.String("openclaw-device-id", "", "OpenClaw device id (default: clawdchan-daemon)")
 	fs.Parse(args)
 
-	// Step 1: identity + config.
+	fmt.Println("🐾 ClawdChan setup — 5 steps: identity, MCP config, PATH, OpenClaw, daemon.")
+
+	// Step 1: identity + config. If config already exists, offer to
+	// refresh alias/relay — the signing keys load from the existing store,
+	// so re-running doesn't regenerate identity or drop pairings.
+	stepHeader(1, "Identity")
 	cfgPath := filepath.Join(defaultDataDir(), configFileName)
 	if _, err := os.Stat(cfgPath); err != nil {
 		if err := setupInit(*yes); err != nil {
@@ -43,19 +47,31 @@ func cmdSetup(args []string) error {
 	} else {
 		c, err := loadConfig()
 		if err == nil {
-			fmt.Printf("[ok] config exists: alias=%q relay=%s\n", c.Alias, c.RelayURL)
+			fmt.Printf("  [ok] configured: alias=%q relay=%s\n", c.Alias, c.RelayURL)
+			if !*yes && stdinIsTTY() {
+				redo, _ := promptYN("  Update alias/relay? [y/N]: ", false)
+				if redo {
+					if err := setupInit(false); err != nil {
+						return fmt.Errorf("reconfigure: %w", err)
+					}
+				}
+			}
 		}
 	}
 
 	// Step 2: offer to write .mcp.json in the current project dir so CC
 	// auto-loads clawdchan-mcp. Skip in -y mode (unattended / CI).
+	stepHeader(2, "Claude Code project config")
 	if !*yes && stdinIsTTY() {
 		if err := setupProjectMCP(); err != nil {
 			fmt.Printf("note: .mcp.json step: %v\n", err)
 		}
+	} else {
+		fmt.Println("(non-interactive — skipped. Run `clawdchan init -write-mcp <dir>` to add later.)")
 	}
 
 	// Step 3: PATH wiring.
+	stepHeader(3, "PATH")
 	if err := cmdPathSetup(nil); err != nil {
 		fmt.Printf("path-setup: %v\n", err)
 	}
@@ -63,25 +79,36 @@ func cmdSetup(args []string) error {
 	// Step 4: optional OpenClaw wiring. Flags win over prompt. In -y mode with
 	// no flags, we leave the existing config alone — there is no sensible
 	// default OpenClaw URL/token to auto-fill.
+	stepHeader(4, "OpenClaw gateway (optional)")
 	if err := setupOpenClaw(*yes, *openClawURL, *openClawToken, *openClawDeviceID); err != nil {
 		fmt.Printf("openclaw setup: %v\n", err)
 	}
 
 	// Step 5: background daemon. Runs last so the service unit it writes
 	// picks up the OpenClaw fields we just saved to config.
+	stepHeader(5, "Background daemon")
 	if err := daemonSetup(nil); err != nil {
 		fmt.Printf("daemon setup: %v\n", err)
 	}
 
 	fmt.Println()
-	fmt.Println("Setup complete. Next:")
+	fmt.Println("✅ Setup complete. Next:")
 	fmt.Println("  1. Restart Claude Code so it loads the MCP server.")
-	fmt.Println("  2. Ask Claude: 'pair me with <friend> via clawdchan'.")
+	fmt.Println(`  2. Ask Claude: "pair me with <friend> via clawdchan."`)
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
 		fmt.Println("  3. OpenClaw config changed — restart the daemon to pick it up:")
 		fmt.Println("     clawdchan daemon install -force")
 	}
 	return nil
+}
+
+// stepHeader prints a visual break + numbered title between setup stages.
+// Keeps the overall flow declarative: each section announces itself before
+// prompting or reporting. Total is hardcoded at 5 — matches cmdSetup's
+// step count and moves together if a stage is ever added or removed.
+func stepHeader(n int, title string) {
+	fmt.Println()
+	fmt.Printf("Step %d of 5 — %s\n", n, title)
 }
 
 // setupOpenClaw wires the optional OpenClaw gateway. Flags override prompts;
@@ -134,25 +161,22 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
 		return nil
 	}
 
-	// Interactive: explain, ask, prompt.
-	fmt.Println()
+	// Interactive: short prompt. Explain only if the user opts in — the
+	// setup is re-run often and the paragraph-before-Y/N got grating.
 	if c.OpenClawURL != "" {
-		fmt.Printf("OpenClaw is currently enabled: %s\n", c.OpenClawURL)
-		ok, err := promptYN("Reconfigure or disable OpenClaw? [y/N]: ", false)
+		fmt.Printf("  OpenClaw gateway configured: %s\n", c.OpenClawURL)
+		ok, err := promptYN("  Reconfigure or disable? [y/N]: ", false)
 		if err != nil || !ok {
-			fmt.Println("Leaving OpenClaw settings unchanged.")
 			return nil
 		}
 	} else {
-		fmt.Println("OpenClaw integration (optional) — routes inbound envelopes into")
-		fmt.Println("OpenClaw sessions alongside Claude Code. If you're not running an")
-		fmt.Println("OpenClaw gateway on this machine, skip this.")
-		fmt.Println("Your existing Claude Code setup is NOT touched either way.")
-		ok, err := promptYN("Configure OpenClaw now? [y/N]: ", false)
+		ok, err := promptYN("  Configure OpenClaw gateway? [y/N]: ", false)
 		if err != nil || !ok {
-			fmt.Println("Skipped. Run `clawdchan setup -openclaw-url=... -openclaw-token=...` later.")
+			fmt.Println("  (not configured)")
 			return nil
 		}
+		fmt.Println("  OpenClaw routes inbound envelopes into OpenClaw sessions alongside Claude Code.")
+		fmt.Println("  Your Claude Code setup is NOT touched either way.")
 	}
 
 	url := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
@@ -192,24 +216,30 @@ func setupInit(yes bool) error {
 	if defaultAlias == "" {
 		defaultAlias = "me"
 	}
+	defaultRelay := defaultPublicRelay
+	// If we already have a config, pre-fill its values as the defaults so
+	// a redo shows current settings in brackets rather than the cold
+	// fresh-install defaults.
+	if existing, err := loadConfig(); err == nil {
+		if existing.Alias != "" {
+			defaultAlias = existing.Alias
+		}
+		if existing.RelayURL != "" {
+			defaultRelay = existing.RelayURL
+		}
+	}
 
 	alias := defaultAlias
-	relay := defaultPublicRelay
+	relay := defaultRelay
 
 	if !yes && stdinIsTTY() {
-		fmt.Println()
-		fmt.Println("First-time ClawdChan setup.")
-		fmt.Println("An alias is how you appear to peers when pairing. The relay is the server")
-		fmt.Println("that forwards encrypted envelopes between your node and theirs. The default")
-		fmt.Println("is a convenience relay we host on fly.io — it sees ciphertext only, but has")
-		fmt.Println("no SLA. For stable or production use, deploy your own (docs/deploy.md).")
-		fmt.Println()
-		alias = promptString(fmt.Sprintf("Display alias [%s]: ", defaultAlias), defaultAlias)
-		relay = promptString(fmt.Sprintf("Relay URL [%s]: ", defaultPublicRelay), defaultPublicRelay)
+		fmt.Println("  Alias = how you appear to peers. Relay = server that forwards")
+		fmt.Println("  encrypted envelopes (ciphertext only; default is a convenience")
+		fmt.Println("  instance on fly.io, no SLA — deploy your own for prod: docs/deploy.md).")
+		alias = promptString(fmt.Sprintf("  Display alias [%s]: ", defaultAlias), defaultAlias)
+		relay = promptString(fmt.Sprintf("  Relay URL [%s]: ", defaultRelay), defaultRelay)
 		if strings.Contains(relay, "localhost") || strings.Contains(relay, "127.0.0.1") {
-			fmt.Println()
-			fmt.Println("Note: you picked a localhost relay. Peers on other machines can't reach")
-			fmt.Println("it. Use the default public relay or deploy your own (docs/deploy.md).")
+			fmt.Println("  note: localhost relay isn't reachable by peers on other machines.")
 		}
 	}
 
@@ -227,7 +257,6 @@ func setupInit(yes bool) error {
 	}
 	defer n.Close()
 	nid := n.Identity()
-	_ = context.Background // keep import live for future use
 	fmt.Printf("[ok] initialized node %s (alias=%q relay=%s)\n",
 		hex.EncodeToString(nid[:])[:16], c.Alias, c.RelayURL)
 	return nil
@@ -245,30 +274,33 @@ func setupProjectMCP() error {
 	dotMCP := filepath.Join(cwd, ".mcp.json")
 
 	if data, err := os.ReadFile(dotMCP); err == nil {
-		if strings.Contains(string(data), "clawdchan") {
-			fmt.Printf("[ok] %s already wires clawdchan\n", dotMCP)
+		if !strings.Contains(string(data), "clawdchan") {
+			fmt.Printf("  note: %s exists but doesn't include clawdchan. Skipping to avoid overwriting your config.\n", dotMCP)
 			return nil
 		}
-		fmt.Printf("note: %s exists but doesn't include clawdchan. Skipping to avoid overwriting your config.\n", dotMCP)
-		return nil
+		fmt.Printf("  [ok] %s already wires clawdchan\n", dotMCP)
+		redo, _ := promptYN("  Rewrite with current clawdchan-mcp path? [y/N]: ", false)
+		if !redo {
+			return nil
+		}
+		// fall through to the write path below
+	} else {
+		fmt.Printf("  Drop a .mcp.json in %s so Claude Code loads clawdchan-mcp here?\n", cwd)
+		ok, err := promptYN("  Write .mcp.json? [Y/n]: ", true)
+		if err != nil || !ok {
+			if !ok {
+				fmt.Println("  Skipped. Run `clawdchan init -write-mcp <dir>` later if you change your mind.")
+			}
+			return nil
+		}
 	}
 
-	fmt.Println()
-	fmt.Printf("Drop a .mcp.json in %s so Claude Code loads clawdchan-mcp here?\n", cwd)
-	ok, err := promptYN("Write .mcp.json in current directory? [Y/n]: ", true)
-	if err != nil || !ok {
-		if !ok {
-			fmt.Println("Skipped. Run `clawdchan init -write-mcp <dir>` later if you change your mind.")
-		}
-		return nil
-	}
 	mcpBin, _ := resolveMCPBinary()
 	path, err := writeProjectMCP(cwd, mcpBin)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", path)
-	fmt.Println("Restart Claude Code to pick up the new MCP server.")
+	fmt.Printf("  [ok] wrote %s — restart Claude Code to pick up the new MCP server.\n", path)
 	return nil
 }
 
