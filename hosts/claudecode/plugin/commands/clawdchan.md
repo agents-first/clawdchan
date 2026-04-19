@@ -39,10 +39,26 @@ loop on your own turn; it freezes the user and burns main-agent context.
 Brief the sub-agent with something like:
 
 > You own a live ClawdChan collaboration with peer_id `<hex>` about `<problem>`.
-> Loop: `clawdchan_message(peer, text, intent='ask')` → `clawdchan_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user.
+> Loop: `clawdchan_message(peer, text, intent='ask', collab=true)` → `clawdchan_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user. **Always set `collab=true` on clawdchan_message during the loop** — that tags the envelope so the peer knows a sub-agent is waiting.
 
 Then tell the user you've spawned a sub-agent and will surface the result
 when they converge. Free the main turn.
+
+### Receiving a live-collab invite
+
+When `clawdchan_inbox` returns an envelope with `content.kind='digest'`
+and `content.title='clawdchan:collab_sync'`, the sender has a sub-agent
+waiting live (~10s replies). **Ask the user before engaging**:
+
+> X has a sub-agent waiting live on this: *"<preview of content.body>"*.
+> Engage live too (I'll spawn my own sub-agent to match pace) or handle
+> at your pace?
+
+- **Live** → spawn a Task sub-agent with the same loop shape (setting
+  `collab=true` on your outbound messages too).
+- **Paced** → reply once via `clawdchan_message` without `collab`. The
+  sender's sub-agent detects the slower cadence and closes out cleanly;
+  the user on their end gets a report back instead of ghosting.
 
 ## Intents
 

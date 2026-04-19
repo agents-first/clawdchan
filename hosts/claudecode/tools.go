@@ -92,7 +92,8 @@ func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 				"clawdchan_message is non-blocking, even for intent=ask. Default mode (passive): send and return to the user; the reply surfaces on the next turn via clawdchan_inbox. Do NOT poll in a loop from the main agent.",
 				"ask_human envelopes from a peer are for the human, not you. pending_asks in the inbox contains them verbatim; present them to the user and call clawdchan_reply with the user's actual words (or clawdchan_decline).",
 				"ACTIVE COLLAB MODE — when the user signals live collaboration with a peer (phrases like 'collaborate with Alice on X', 'iterate with her agent until you converge', 'work it out with Bruce', or they explicitly start a real problem and say both sides are on it): spawn a sub-agent via the Task tool. Do NOT run the loop on the main agent's turn — it blocks the user and burns main-agent context. Give the sub-agent a self-contained brief: the peer_id, the problem, what 'convergence' means, a max round count (e.g. 20), and permission to use clawdchan_message + clawdchan_await in a tight loop. The sub-agent returns a final summary when converged / stuck / max rounds. Main agent immediately returns control to the user and surfaces the sub-agent's summary when it lands.",
-				"Sub-agent loop shape: clawdchan_message(peer, text, intent='ask') → clawdchan_await(peer, timeout_seconds=10) → if envelope: integrate + respond + repeat; if timeout: send a nudge OR report 'peer went silent' and stop after 2-3 consecutive timeouts. Always exit on user-visible errors.",
+				"Sub-agent loop shape: clawdchan_message(peer, text, intent='ask', collab=true) → clawdchan_await(peer, timeout_seconds=10) → if envelope: integrate + respond + repeat; if timeout: send a nudge OR report 'peer went silent' and stop after 2-3 consecutive timeouts. Always exit on user-visible errors. IMPORTANT: set collab=true on every clawdchan_message during the loop. That marks the envelope (title='clawdchan:collab_sync') so the peer's side knows a sub-agent is waiting live, and can either spawn their own matching sub-agent or reply at their pace without ghosting.",
+				"RECEIVING SIDE — when clawdchan_inbox returns an envelope with content.kind='digest' and content.title='clawdchan:collab_sync', the sender has a live sub-agent waiting (~10s replies). BEFORE answering, present the choice to the user verbatim: 'X has a sub-agent waiting live on this (<preview of content.body>). Engage live too (I'll spawn my own sub-agent to match pace) or handle at your pace?'. If the user picks live: spawn a Task sub-agent with the same loop shape. If paced: reply once via clawdchan_message (no collab flag needed); the sender's sub-agent will detect the slower cadence and either continue or close out cleanly. Don't silently enter either mode — always ask.",
 			},
 			"notes": []string{
 				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds.",
@@ -272,11 +273,14 @@ func messageTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_message",
 		mcp.WithDescription("Send a message to a paired peer. Thread bookkeeping is automatic: the first message "+
 			"to a peer opens a conversation; later messages continue it. Non-blocking — returns on relay ack, "+
-			"NOT on peer reply. Never wait in a loop for the peer's reply; return to the user, and read "+
-			"clawdchan_inbox on the next turn (or when the daemon toast prompts the user)."),
-		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex peer node id. Get it from clawdchan_peers.")),
+			"NOT on peer reply. Never wait in a loop for the peer's reply from the main agent; return to the user, "+
+			"and read clawdchan_inbox on the next turn (or when the daemon toast prompts the user). "+
+			"When called from a Task sub-agent running a live collab loop, set collab=true — this marks the "+
+			"envelope so the peer's side understands a sub-agent is waiting and can engage at matching pace."),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to send to. Accepts a 64-char hex node id, a unique hex prefix (>=4), or an exact alias.")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("Message body.")),
-		mcp.WithString("intent", mcp.Description("say | ask | notify_human | ask_human. Default 'say'.")),
+		mcp.WithString("intent", mcp.Description("say | ask | notify_human | ask_human. Default 'say'. For collab loops use intent='ask'.")),
+		mcp.WithBoolean("collab", mcp.Description("Set true from a live-collab sub-agent to signal the peer their side can engage live (spawn a matching sub-agent) or pace async. Default false.")),
 	)
 }
 
@@ -298,17 +302,31 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		collab := req.GetBool("collab", false)
 		tid, err := resolveOrOpenThread(ctx, n, peerID)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if err := n.Send(ctx, tid, intent, envelope.Content{Kind: envelope.ContentText, Text: text}); err != nil {
+		content := envelope.Content{Kind: envelope.ContentText, Text: text}
+		if collab {
+			// Wrap as ContentDigest with a reserved title. The peer's inbox
+			// output shows the title explicitly, and the daemon switches
+			// notification copy when it sees this marker — so the receiver's
+			// side knows a live-collab sub-agent is waiting.
+			content = envelope.Content{
+				Kind:  envelope.ContentDigest,
+				Title: collabSyncTitle,
+				Body:  text,
+			}
+		}
+		if err := n.Send(ctx, tid, intent, content); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		out := map[string]any{
 			"ok":         true,
 			"peer_id":    hex.EncodeToString(peerID[:]),
 			"sent_at_ms": time.Now().UnixMilli(),
+			"collab":     collab,
 		}
 		if w := maybeAttachListenerWarning(n); w != nil {
 			out["setup_warning"] = w
@@ -316,6 +334,11 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 		return jsonResult(out), nil
 	}
 }
+
+// collabSyncTitle is the reserved Content.Title value that marks an
+// envelope as part of an active live-collab exchange. The peer's MCP
+// surface and the daemon both key off this constant, so it's shared.
+const collabSyncTitle = "clawdchan:collab_sync"
 
 // resolveOrOpenThread returns the most recent thread with the peer, or opens
 // a new one if none exists. Threads are persisted across sessions, so this

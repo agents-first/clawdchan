@@ -252,9 +252,22 @@ func (d *daemonSurface) isNewSession(tid envelope.ThreadID) bool {
 //
 // Body holds the short CTA so the user learns the UX: they can't be
 // interrupted mid-session by the agent, but they know how to resume.
+//
+// A ContentDigest with Title="clawdchan:collab_sync" gets differentiated
+// copy: the sender's sub-agent is waiting live, so the receiver's toast
+// reads as an invitation to match pace, not just a reply.
 func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, newSession bool) notify.Message {
 	preview := introPreview(c)
 	msg := notify.Message{Title: "ClawdChan"}
+
+	if isCollabSync(c) {
+		msg.Subtitle = fmt.Sprintf("%s is collabing live", alias)
+		if preview != "" {
+			msg.Subtitle += `: "` + preview + `"`
+		}
+		msg.Body = "Engage live or pace it — ask me about it in Claude Code."
+		return msg
+	}
 
 	var subject string
 	switch intent {
@@ -283,6 +296,14 @@ func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, 
 		msg.Subtitle = subject
 	}
 	return msg
+}
+
+// isCollabSync reports whether c is a live-collab envelope by matching the
+// reserved Content.Title. Kept here (not imported from the host package) so
+// the daemon doesn't depend on hosts/; the constant is part of the wire
+// contract between sender and receiver.
+func isCollabSync(c envelope.Content) bool {
+	return c.Kind == envelope.ContentDigest && c.Title == "clawdchan:collab_sync"
 }
 
 func introPreview(c envelope.Content) string {
