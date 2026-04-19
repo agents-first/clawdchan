@@ -260,6 +260,13 @@ func buildDispatcher(c config) (policy.Dispatcher, *dispatchConfig) {
 const debounceWindow = 30 * time.Second
 const activeExchangeWindow = 60 * time.Second
 
+// activeCollabWindow: if this thread has seen a collab-sync envelope
+// (either direction) within this window, a newly-arriving collab-sync is
+// treated as a continuation of an ongoing live session rather than a
+// fresh invitation. Toast fires on session start; the back-and-forth
+// that follows stays silent and surfaces through the MCP inbox instead.
+const activeCollabWindow = 3 * time.Minute
+
 func (d *daemonSurface) Notify(_ context.Context, tid envelope.ThreadID, env envelope.Envelope) error {
 	d.dispatch(tid, env)
 	return nil
@@ -302,13 +309,14 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 		}
 	}
 
-	// Active-exchange suppression: if we've sent to this peer within the
-	// last activeExchangeWindow, they're expecting our attention — no need
-	// to toast their reply. ask_human bypasses this because the human
-	// must see the question regardless of whether an agent loop is live.
-	if env.Intent != envelope.IntentAskHuman && d.recentlySentTo(env.From.NodeID) {
+	// Active-session suppression: once a thread is already mid-session,
+	// every new envelope is back-and-forth the user has signed up for —
+	// regardless of intent. Session initiation (fresh thread, or thread
+	// gone quiet for longer than the active window) toasts; follow-ups
+	// stay silent and surface through the MCP inbox on Claude's next turn.
+	if reason, active := d.inActiveSession(tid, env.From.NodeID, env.CreatedAtMs); active {
 		if d.verbose {
-			fmt.Fprintf(os.Stderr, "[active-exchange] suppressed toast from=%s intent=%s\n", env.From.Alias, intentName(env.Intent))
+			fmt.Fprintf(os.Stderr, "[active-session] suppressed toast from=%s intent=%s reason=%s\n", env.From.Alias, intentName(env.Intent), reason)
 		}
 		return
 	}
@@ -352,11 +360,46 @@ func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	}
 }
 
-// recentlySentTo returns true if any envelope on any thread with this peer
-// was sent by us within the activeExchangeWindow. Used to suppress toasts
-// during a live back-and-forth — the user is clearly engaged, so the OS
-// banner would be noise.
-func (d *daemonSurface) recentlySentTo(peer identity.NodeID) bool {
+// inActiveSession reports whether thread tid is already mid-session at
+// the moment the incoming envelope arrived. Two conditions qualify, and
+// either is enough:
+//
+//  1. we sent an envelope on any thread with this peer within
+//     activeExchangeWindow — the peer is expecting our attention and
+//     their reply is the back half of that exchange;
+//  2. a collab-sync marker appeared on this thread within
+//     activeCollabWindow — two sub-agents are running a live loop on
+//     this thread and every envelope in it (collab-sync, ask_human,
+//     say, ...) is a round of that loop, not a fresh invitation.
+//
+// The distinction matters because a toast is only useful for "something
+// new started"; once a session is underway the MCP inbox is the right
+// surface and a banner per round is noise. Returns a short reason tag
+// for the verbose log so we can tell the two conditions apart in
+// debugging.
+func (d *daemonSurface) inActiveSession(tid envelope.ThreadID, peer identity.NodeID, incomingMs int64) (string, bool) {
+	if d.recentOutbound(peer) {
+		return "recent-outbound", true
+	}
+	envs, err := d.node.ListEnvelopes(context.Background(), tid, 0)
+	if err != nil {
+		return "", false
+	}
+	cutoffMs := incomingMs - activeCollabWindow.Milliseconds()
+	for _, e := range envs {
+		if e.CreatedAtMs >= incomingMs || e.CreatedAtMs < cutoffMs {
+			continue
+		}
+		if isCollabSync(e.Content) {
+			return "active-collab", true
+		}
+	}
+	return "", false
+}
+
+// recentOutbound returns true if any envelope on any thread with this
+// peer was sent by us within activeExchangeWindow.
+func (d *daemonSurface) recentOutbound(peer identity.NodeID) bool {
 	threads, err := d.node.ListThreads(context.Background())
 	if err != nil {
 		return false
@@ -716,7 +759,7 @@ func (d *daemonSurface) fallbackToToast(tid envelope.ThreadID, env envelope.Enve
 	if d.verbose && note != "" {
 		fmt.Fprintf(os.Stderr, "[dispatch] fallback toast: %s\n", note)
 	}
-	if env.Intent != envelope.IntentAskHuman && d.recentlySentTo(env.From.NodeID) {
+	if _, active := d.inActiveSession(tid, env.From.NodeID, env.CreatedAtMs); active {
 		return
 	}
 	d.mu.Lock()
