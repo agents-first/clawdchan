@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -259,14 +260,29 @@ func installWindowsTask(bin string, force bool) error {
 		fmt.Printf("already installed: task %q (use -force to overwrite)\n", windowsTaskName)
 	} else {
 		taskRun := fmt.Sprintf(`"%s" daemon run`, bin)
-		out, err := exec.Command("schtasks", "/Create",
+		args := []string{"/Create",
 			"/TN", windowsTaskName,
 			"/TR", taskRun,
 			"/SC", "ONLOGON",
 			"/RL", "LIMITED",
-			"/F").CombinedOutput()
+			"/F"}
+		// Pin the task to the current user so schtasks doesn't need admin.
+		// Without /RU, ONLOGON defaults to "any user" which requires elevation.
+		if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
+			args = append(args, "/RU", u.Username)
+		}
+		out, err := exec.Command("schtasks", args...).CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
+			// If Windows denied the task creation, retry via UAC elevation.
+			// Pops a single consent dialog; all other setup stays inline.
+			if strings.Contains(string(out), "Access is denied") {
+				fmt.Println("Scheduled Task creation needs admin — a Windows UAC prompt will appear.")
+				if elevErr := elevatedSchtasksCreate(args); elevErr != nil {
+					return fmt.Errorf("schtasks /Create (elevated): %w", elevErr)
+				}
+			} else {
+				return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
+			}
 		}
 		fmt.Printf("created scheduled task %q\n", windowsTaskName)
 	}
@@ -390,7 +406,11 @@ func daemonUninstall(_ []string) error {
 
 // --- status ----------------------------------------------------------------
 
-func daemonStatus(_ []string) error {
+func daemonStatus(args []string) error {
+	fs := flag.NewFlagSet("daemon status", flag.ExitOnError)
+	verbose := fs.Bool("v", false, "show OpenClaw connection state and recent log lines")
+	fs.Parse(args)
+
 	c, err := loadConfig()
 	if err != nil {
 		return err
@@ -408,6 +428,14 @@ func daemonStatus(_ []string) error {
 		fmt.Printf("running: pid=%d alias=%s relay=%s started=%s\n",
 			e.PID, e.Alias, e.RelayURL,
 			time.UnixMilli(e.StartedMs).Format(time.RFC3339))
+		if *verbose {
+			if e.OpenClawHostActive {
+				fmt.Printf("  openclaw: connected  url=%s device=%s\n",
+					e.OpenClawURL, e.OpenClawDeviceID)
+			} else {
+				fmt.Println("  openclaw: not active")
+			}
+		}
 	}
 	if running == 0 {
 		fmt.Println("not running")
@@ -437,6 +465,35 @@ func daemonStatus(_ []string) error {
 			fmt.Println("not installed as a scheduled task — run `clawdchan daemon install`.")
 		}
 	}
+
+	if *verbose {
+		if err := printDaemonLog(c.DataDir, 40); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("warn: could not read daemon log: %v\n", err)
+		}
+	}
+	return nil
+}
+
+func daemonLogPath(dataDir string) string {
+	return filepath.Join(dataDir, "daemon.log")
+}
+
+func printDaemonLog(dataDir string, lines int) error {
+	path := daemonLogPath(dataDir)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	start := 0
+	if len(all) > lines {
+		start = len(all) - lines
+	}
+	tail := all[start:]
+	fmt.Printf("\n--- daemon log (last %d lines: %s) ---\n", len(tail), path)
+	for _, l := range tail {
+		fmt.Println(l)
+	}
 	return nil
 }
 
@@ -460,6 +517,29 @@ func resolveSelfBinary() (string, error) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// elevatedSchtasksCreate reruns "schtasks /Create ..." via a UAC-elevated
+// PowerShell launch. Uses -Wait so the caller can proceed only after the
+// elevated process exits, and checks the resulting task exists so a user
+// who dismisses the UAC prompt gets a clear error instead of silent success.
+func elevatedSchtasksCreate(args []string) error {
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", "''")+"'")
+	}
+	ps := fmt.Sprintf(
+		"Start-Process -FilePath 'schtasks.exe' -ArgumentList %s -Verb RunAs -Wait -WindowStyle Hidden",
+		strings.Join(quoted, ","),
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("powershell Start-Process: %w: %s", err, string(out))
+	}
+	if err := exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run(); err != nil {
+		return fmt.Errorf("task %q not present after elevation (UAC likely cancelled)", windowsTaskName)
+	}
+	return nil
 }
 
 const launchdPlistTmpl = `<?xml version="1.0" encoding="UTF-8"?>

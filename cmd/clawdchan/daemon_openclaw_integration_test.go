@@ -24,6 +24,8 @@ type testGatewayMessage struct {
 	Type    string          `json:"type"`
 	ID      string          `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
+	Event   string          `json:"event,omitempty"`
+	OK      bool            `json:"ok,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
@@ -58,10 +60,11 @@ func newFakeOpenClawGateway(t *testing.T, token string) *fakeOpenClawGateway {
 		gw.mu.Unlock()
 
 		_ = conn.WriteJSON(testGatewayMessage{
-			Type:   "event",
-			Method: "hello",
+			Type:  "event",
+			Event: "connect.challenge",
 			Payload: mustJSON(t, map[string]any{
 				"nonce": "nonce-test",
+				"ts":    0,
 			}),
 		})
 
@@ -72,7 +75,12 @@ func newFakeOpenClawGateway(t *testing.T, token string) *fakeOpenClawGateway {
 		if connectReq.Type != "req" || connectReq.Method != "connect" {
 			return
 		}
-		_ = conn.WriteJSON(testGatewayMessage{Type: "event", Method: "hello-ok"})
+		_ = conn.WriteJSON(testGatewayMessage{
+			Type:    "res",
+			ID:      connectReq.ID,
+			OK:      true,
+			Payload: mustJSON(t, map[string]any{"type": "hello-ok"}),
+		})
 
 		for {
 			var req testGatewayMessage

@@ -10,11 +10,24 @@ OPENCLAW_URL       ?=
 OPENCLAW_TOKEN     ?=
 OPENCLAW_DEVICE_ID ?=
 
+# Exe extension: .exe on Windows, empty elsewhere.
+EXE :=
+
 # Recipes use Unix shell syntax (mkdir -p, rm -rf, case, ||). Force bash on
 # Windows — GNU Make would otherwise default to cmd.exe and fail.
 ifeq ($(OS),Windows_NT)
+# Prefer Git Bash over WSL's bash (System32\bash.exe runs Linux and can't see
+# Windows Go). Use the 8.3 short path so spaces don't break SHELL parsing.
+# Override with: make SHELL=/path/to/bash.exe install
+ifneq ($(wildcard C:/PROGRA~1/Git/bin/bash.exe),)
+SHELL := C:/PROGRA~1/Git/bin/bash.exe
+else ifneq ($(wildcard C:/PROGRA~1/Git/usr/bin/bash.exe),)
+SHELL := C:/PROGRA~1/Git/usr/bin/bash.exe
+else
 SHELL := bash.exe
+endif
 .SHELLFLAGS := -c
+EXE := .exe
 endif
 
 all: build
@@ -53,14 +66,10 @@ install-binaries:
 # only add what's missing. OpenClaw is asked about inside setup; skipping
 # leaves config untouched.
 install: install-binaries
-ifeq ($(OS),Windows_NT)
-	@powershell -NoProfile -Command "$$gobin = go env GOBIN; if (-not $$gobin) { $$gobin = Join-Path (go env GOPATH) 'bin' }; Write-Host \"Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$gobin\"; & (Join-Path $$gobin 'clawdchan.exe') setup; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }"
-else
 	@GOBIN="$$(go env GOBIN)"; if [ -z "$$GOBIN" ]; then GOBIN="$$(go env GOPATH)/bin"; fi; \
 	  GOBIN=$$(printf '%s' "$$GOBIN" | tr '\\\\' '/'); \
 	  echo "Installed clawdchan, clawdchan-relay, clawdchan-mcp to $$GOBIN"; \
-	  "$$GOBIN/clawdchan" setup || true
-endif
+	  "$$GOBIN/clawdchan$(EXE)" setup || true
 
 # install-openclaw bypasses the OpenClaw prompt by passing flags straight into
 # `clawdchan setup`. Pass OPENCLAW_URL=none to clear a previously-saved
@@ -70,16 +79,12 @@ install-openclaw: install-binaries
 	@if [ -z "$(OPENCLAW_URL)" ]; then \
 	  echo "error: set OPENCLAW_URL=wss://... (or OPENCLAW_URL=none to disable)" >&2; exit 2; \
 	fi
-ifeq ($(OS),Windows_NT)
-	@powershell -NoProfile -Command "$$gobin = go env GOBIN; if (-not $$gobin) { $$gobin = Join-Path (go env GOPATH) 'bin' }; & (Join-Path $$gobin 'clawdchan.exe') setup -openclaw-url='$(OPENCLAW_URL)' -openclaw-token='$(OPENCLAW_TOKEN)' -openclaw-device-id='$(OPENCLAW_DEVICE_ID)'; if ($$LASTEXITCODE -ne 0) { $$global:LASTEXITCODE = 0 }"
-else
 	@GOBIN="$$(go env GOBIN)"; if [ -z "$$GOBIN" ]; then GOBIN="$$(go env GOPATH)/bin"; fi; \
 	  GOBIN=$$(printf '%s' "$$GOBIN" | tr '\\\\' '/'); \
-	  "$$GOBIN/clawdchan" setup \
+	  "$$GOBIN/clawdchan$(EXE)" setup \
 	    -openclaw-url="$(OPENCLAW_URL)" \
 	    -openclaw-token="$(OPENCLAW_TOKEN)" \
 	    -openclaw-device-id="$(OPENCLAW_DEVICE_ID)" || true
-endif
 
 run-relay:
 	go run ./cmd/clawdchan-relay -addr :8787

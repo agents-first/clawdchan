@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +24,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/notify"
 	"github.com/vMaroon/ClawdChan/core/pairing"
 	"github.com/vMaroon/ClawdChan/core/policy"
+	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/core/surface"
 	"github.com/vMaroon/ClawdChan/hosts/openclaw"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
@@ -75,6 +80,18 @@ func daemonRun(args []string) error {
 		return err
 	}
 
+	// When running as a background service (no terminal), redirect all log
+	// output to ~/.clawdchan/daemon.log so `daemon status -v` can tail it.
+	if !stdinIsTTY() {
+		logPath := daemonLogPath(c.DataDir)
+		lf, lerr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if lerr == nil {
+			log.SetOutput(lf)
+			log.SetFlags(log.Ldate | log.Ltime)
+			defer lf.Close()
+		}
+	}
+
 	dispatcher, dispatchCfg := buildDispatcher(c)
 	d := &daemonSurface{
 		verbose:     *verbose,
@@ -109,6 +126,17 @@ func daemonRun(args []string) error {
 	}
 	if c.OpenClawDeviceID != "" && *openClawDeviceID == "clawdchan-daemon" {
 		*openClawDeviceID = c.OpenClawDeviceID
+	}
+
+	// Auto-discover OpenClaw gateway when not explicitly configured.
+	if *openClawURL == "" {
+		if ws, tok, err := discoverOpenClaw(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "openclaw auto-discover: %v\n", err)
+		} else if ws != "" {
+			*openClawURL = ws
+			*openClawToken = tok
+			fmt.Printf("openclaw: auto-discovered gateway at %s\n", ws)
+		}
 	}
 
 	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID)
@@ -147,6 +175,7 @@ func daemonRun(args []string) error {
 type openClawRuntime struct {
 	bridge     *openclaw.Bridge
 	cancelSubs []context.CancelFunc
+	hub        *openclaw.Hub
 }
 
 func (r *openClawRuntime) Close() {
@@ -161,6 +190,75 @@ func (r *openClawRuntime) Close() {
 	}
 }
 
+// parseOpenClawDashboardURL parses a URL in the format emitted by
+// "openclaw dashboard": http://127.0.0.1:18789/#token=<token>
+// It returns the WebSocket URL (http→ws, https→wss) and the bearer token.
+func parseOpenClawDashboardURL(raw string) (wsURL, token string, err error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", err
+	}
+	if u.Host == "" {
+		return "", "", fmt.Errorf("no host in URL %q", raw)
+	}
+	fv, err := url.ParseQuery(u.Fragment)
+	if err != nil || fv.Get("token") == "" {
+		return "", "", fmt.Errorf("no token in URL fragment %q", u.Fragment)
+	}
+	token = fv.Get("token")
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	}
+	u.Fragment = ""
+	return u.String(), token, nil
+}
+
+// discoverOpenClaw runs "openclaw dashboard", reads its stdout for a URL
+// containing #token=, and returns the parsed WebSocket URL and token.
+// Returns ("", "", nil) when openclaw is not installed or the gateway is
+// unreachable — the caller treats that as "skip OpenClaw silently".
+func discoverOpenClaw(ctx context.Context) (wsURL, token string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "openclaw", "dashboard")
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		return "", "", nil
+	}
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return "", "", nil // openclaw not installed
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Try the whole line as a URL first.
+		if ws, tok, err := parseOpenClawDashboardURL(line); err == nil {
+			return ws, tok, nil
+		}
+		// The URL may be embedded in a longer line ("Dashboard at http://...").
+		if idx := strings.Index(line, "http"); idx >= 0 {
+			candidate := line[idx:]
+			if sp := strings.IndexByte(candidate, ' '); sp > 0 {
+				candidate = candidate[:sp]
+			}
+			if ws, tok, err := parseOpenClawDashboardURL(candidate); err == nil {
+				return ws, tok, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
 func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string) (*openClawRuntime, error) {
 	if wsURL == "" {
 		return nil, nil
@@ -173,7 +271,12 @@ func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceI
 		cleanup.Close()
 	}()
 
-	bridge := openclaw.NewBridge(wsURL, token, deviceID)
+	keyPath := filepath.Join(n.DataDir(), "openclaw_device.key")
+	deviceKey, err := openclaw.LoadOrCreateDeviceKey(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("openclaw device key: %w", err)
+	}
+	bridge := openclaw.NewBridge(wsURL, token, deviceID, deviceKey)
 	if err := bridge.Connect(ctx); err != nil {
 		return nil, fmt.Errorf("openclaw connect: %w", err)
 	}
@@ -202,10 +305,29 @@ func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceI
 		if err != nil {
 			return nil, fmt.Errorf("ensure openclaw session for thread %x: %w", th.ID[:], err)
 		}
+		peer, err := n.GetPeer(ctx, th.PeerID)
+		switch {
+		case err == nil:
+			_ = bridge.SessionsSend(ctx, sid, openclaw.PeerContext(n.Alias(), peer.Alias))
+		case errors.Is(err, store.ErrNotFound):
+			peerAlias := hex.EncodeToString(th.PeerID[:])
+			if len(peerAlias) > 8 {
+				peerAlias = peerAlias[:8]
+			}
+			_ = bridge.SessionsSend(ctx, sid, openclaw.PeerContext(n.Alias(), peerAlias))
+		}
+
 		subCtx, subCancel := context.WithCancel(ctx)
 		cleanup.cancelSubs = append(cleanup.cancelSubs, subCancel)
 		go bridge.RunSubscriber(subCtx, sid, n, th.ID)
 	}
+	hub := openclaw.NewHub(n, bridge, sm)
+	go func() {
+		if err := hub.Start(ctx); err != nil {
+			log.Printf("openclaw: hub session error: %v", err)
+		}
+	}()
+	cleanup.hub = hub
 
 	keep := cleanup
 	cleanup = nil

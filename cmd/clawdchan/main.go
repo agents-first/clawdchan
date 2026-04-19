@@ -840,7 +840,7 @@ func activeOpenClawConfig(dataDir, nodeID string) (listenerreg.Entry, bool) {
 }
 
 func checkOpenClawGateway(ctx context.Context, cfg listenerreg.Entry) error {
-	bridge := openclaw.NewBridge(cfg.OpenClawURL, cfg.OpenClawToken, firstNonEmpty(cfg.OpenClawDeviceID, "clawdchan-daemon"))
+	bridge := openclaw.NewBridge(cfg.OpenClawURL, cfg.OpenClawToken, firstNonEmpty(cfg.OpenClawDeviceID, "clawdchan-daemon"), nil)
 	if err := bridge.Connect(ctx); err != nil {
 		return err
 	}
