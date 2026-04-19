@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -131,7 +132,16 @@ func stepHeader(n int, title string) {
 // in -y mode without flags we silently keep whatever is already saved.
 // Passing -openclaw-url=none disables OpenClaw by clearing the config entry.
 // This step never touches Claude Code configuration.
-func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
+func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) (err error) {
+	defer func() {
+		if err == nil {
+			c, loadErr := loadConfig()
+			if loadErr == nil && c.OpenClawURL != "" {
+				deployOpenClawAgentAssets()
+			}
+		}
+	}()
+
 	c, err := loadConfig()
 	if err != nil {
 		return err
@@ -375,4 +385,91 @@ func promptString(prompt, defaultVal string) string {
 		return defaultVal
 	}
 	return ans
+}
+
+const clawdchanGuideMarkdown = `# ClawdChan Guide
+
+You are equipped with the **ClawdChan MCP Toolkit**, which allows you to communicate with other agents and humans over an end-to-end encrypted protocol.
+
+## Core Concepts
+- **Node:** Your local ClawdChan identity.
+- **Peer:** A remote contact (human or agent).
+- **Pairing Code:** A 128-bit code (shown as 12 BIP39 words) used to establish a secure connection.
+- **Mnemonic:** A 12-word recovery phrase for your identity.
+
+## Available Tools
+- ` + "`" + `clawdchan_whoami` + "`" + `: Check your own Node ID and display alias.
+- ` + "`" + `clawdchan_pair` + "`" + `: Generate a pairing code or consume one provided by a user.
+- ` + "`" + `clawdchan_peers` + "`" + `: List your currently paired contacts.
+- ` + "`" + `clawdchan_message` + "`" + `: Send a message to a paired peer.
+- ` + "`" + `clawdchan_inbox` + "`" + `: Check for incoming messages and pending requests.
+- ` + "`" + `clawdchan_reply` + "`" + ` / ` + "`" + `clawdchan_decline` + "`" + `: Respond to structured requests from peers.
+
+## How to Pair with Someone
+1. **To let someone pair with you:**
+   - Call ` + "`" + `clawdchan_pair` + "`" + ` with no arguments. 
+   - It will return a 12-word code. 
+   - Give these words to the person you want to pair with.
+2. **To pair with someone else's code:**
+   - Ask the user for their 12-word pairing code.
+   - Call ` + "`" + `clawdchan_pair` + "`" + ` and pass those 12 words as the ` + "`" + `code` + "`" + ` parameter.
+
+## Important Notes
+- ClawdChan messages are end-to-end encrypted.
+- You can talk to humans using Claude Code or other OpenClaw instances.
+`
+
+func deployOpenClawAgentAssets() {
+	home, _ := os.UserHomeDir()
+	ocPath := filepath.Join(home, ".openclaw", "openclaw.json")
+	data, err := os.ReadFile(ocPath)
+	if err != nil {
+		return // OpenClaw not installed or different home
+	}
+
+	var ocConfig struct {
+		Agents struct {
+			Defaults struct {
+				Workspace string `json:"workspace"`
+			} `json:"defaults"`
+			List []struct {
+				Workspace string `json:"workspace"`
+			} `json:"list"`
+		} `json:"agents"`
+	}
+
+	if err := json.Unmarshal(data, &ocConfig); err != nil {
+		return
+	}
+
+	workspaces := make(map[string]bool)
+	if ocConfig.Agents.Defaults.Workspace != "" {
+		workspaces[ocConfig.Agents.Defaults.Workspace] = true
+	}
+	for _, a := range ocConfig.Agents.List {
+		if a.Workspace != "" {
+			workspaces[a.Workspace] = true
+		}
+	}
+
+	count := 0
+	for ws := range workspaces {
+		guidePath := filepath.Join(ws, "CLAWDCHAN_GUIDE.md")
+		_ = os.WriteFile(guidePath, []byte(clawdchanGuideMarkdown), 0o644)
+
+		soulPath := filepath.Join(ws, "SOUL.md")
+		soulData, err := os.ReadFile(soulPath)
+		if err == nil && !strings.Contains(string(soulData), "ClawdChan") {
+			f, err := os.OpenFile(soulPath, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err == nil {
+				_, _ = f.WriteString("\n\n## ClawdChan\n\nYou are a ClawdChan-enabled agent. You can communicate securely with other agents and humans globally. Use `clawdchan_pair` to connect with new peers and `clawdchan_message` to talk to them. Refer to `CLAWDCHAN_GUIDE.md` for tool specifics.\n")
+				f.Close()
+			}
+		}
+		count++
+	}
+
+	if count > 0 {
+		fmt.Printf("[ok] Deployed ClawdChan guide to %d OpenClaw agent workspace(s)\n", count)
+	}
 }
