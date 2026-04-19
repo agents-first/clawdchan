@@ -29,6 +29,12 @@ type HumanSurface interface {
 	PresentThread(ctx context.Context, thread envelope.ThreadID) error
 }
 
+// ErrAsyncReply is returned by HumanSurface.Ask when the ask has been
+// delivered to an async surface (OpenClaw session, CC inbox, messenger
+// gateway, ...) and the reply will arrive later via SubmitHumanReply.
+// The core treats this as success — no auto-reply is generated.
+var ErrAsyncReply = errors.New("surface: ask delivered; reply is async")
+
 // AgentSurface is the reverse direction: the core delivers agent-facing
 // envelopes here.
 type AgentSurface interface {

@@ -41,6 +41,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
 	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/vMaroon/ClawdChan/hosts/openclaw"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
 
@@ -48,6 +49,16 @@ type config struct {
 	DataDir  string `json:"data_dir"`
 	RelayURL string `json:"relay_url"`
 	Alias    string `json:"alias"`
+
+	// OpenClaw fields are optional. When OpenClawURL is empty, the daemon
+	// runs in its default CC-only mode. When set, the daemon connects to the
+	// gateway and routes inbound human-surface traffic into OpenClaw sessions
+	// in addition to firing OS notifications for Claude Code. This lives here
+	// (rather than in a separate file) so `clawdchan setup` can configure
+	// everything end-to-end in one pass.
+	OpenClawURL      string `json:"openclaw_url,omitempty"`
+	OpenClawToken    string `json:"openclaw_token,omitempty"`
+	OpenClawDeviceID string `json:"openclaw_device_id,omitempty"`
 }
 
 const configFileName = "config.json"
@@ -745,6 +756,20 @@ func cmdDoctor(args []string) error {
 	defer n.Stop()
 	fmt.Printf("  [ok]  relay reachable\n")
 
+	// Minimum-change OpenClaw config surface: detect active daemon OpenClaw mode
+	// from the listener registry entry the daemon writes at startup.
+	if openClawCfg, ok := activeOpenClawConfig(c.DataDir, hex.EncodeToString(id[:])); ok {
+		fmt.Printf("  [ok]  openclaw mode active: %s\n", openClawCfg.OpenClawURL)
+		openClawCtx, openClawCancel := context.WithTimeout(context.Background(), *timeout)
+		defer openClawCancel()
+		if err := checkOpenClawGateway(openClawCtx, openClawCfg); err != nil {
+			fmt.Printf("  [FAIL] openclaw gateway connect: %v\n", err)
+			fmt.Printf("         %s\n", openClawRemediation(err, openClawCfg.OpenClawURL))
+			return err
+		}
+		fmt.Printf("  [ok]  openclaw gateway reachable\n")
+	}
+
 	// 7. peers / threads summary
 	peers, _ := n.ListPeers(context.Background())
 	threads, _ := n.ListThreads(context.Background())
@@ -780,6 +805,45 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func activeOpenClawConfig(dataDir, nodeID string) (listenerreg.Entry, bool) {
+	entries, err := listenerreg.List(dataDir)
+	if err != nil {
+		return listenerreg.Entry{}, false
+	}
+	var best listenerreg.Entry
+	ok := false
+	for _, e := range entries {
+		if e.Kind != listenerreg.KindCLI || !strings.EqualFold(e.NodeID, nodeID) || !e.OpenClawHostActive {
+			continue
+		}
+		if !ok || e.StartedMs > best.StartedMs {
+			best = e
+			ok = true
+		}
+	}
+	return best, ok
+}
+
+func checkOpenClawGateway(ctx context.Context, cfg listenerreg.Entry) error {
+	bridge := openclaw.NewBridge(cfg.OpenClawURL, cfg.OpenClawToken, firstNonEmpty(cfg.OpenClawDeviceID, "clawdchan-daemon"))
+	if err := bridge.Connect(ctx); err != nil {
+		return err
+	}
+	return bridge.Close()
+}
+
+func openClawRemediation(err error, wsURL string) string {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "401"), strings.Contains(msg, "403"), strings.Contains(msg, "unauthorized"), strings.Contains(msg, "forbidden"), strings.Contains(msg, "auth"):
+		return "gateway rejected the token; update daemon -openclaw-token and restart the daemon service."
+	case strings.Contains(msg, "dial"), strings.Contains(msg, "connection refused"), strings.Contains(msg, "no such host"), strings.Contains(msg, "timeout"):
+		return fmt.Sprintf("gateway unreachable; ensure OpenClaw is listening at %s and daemon -openclaw matches that URL.", wsURL)
+	default:
+		return "check OpenClaw gateway logs and daemon -openclaw/-openclaw-token flags for mismatches."
+	}
 }
 
 // --- helpers ----------------------------------------------------------------

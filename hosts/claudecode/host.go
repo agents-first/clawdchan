@@ -11,7 +11,6 @@ package claudecode
 
 import (
 	"context"
-	"errors"
 
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/surface"
@@ -27,10 +26,10 @@ func (HumanSurface) Notify(context.Context, envelope.ThreadID, envelope.Envelope
 }
 
 func (HumanSurface) Ask(context.Context, envelope.ThreadID, envelope.Envelope) (envelope.Content, error) {
-	// Return error so the node does not auto-reply. The envelope stays in
-	// the store; Claude picks it up via clawdchan_inbox and calls
-	// clawdchan_reply once the user has answered in-session.
-	return envelope.Content{}, errors.New("claudecode: AskHuman surfaces asynchronously via MCP tools")
+	// Signal async delivery: the envelope stays in the store; Claude picks it
+	// up via clawdchan_inbox and calls clawdchan_reply once the user answers
+	// in-session.
+	return envelope.Content{}, surface.ErrAsyncReply
 }
 
 func (HumanSurface) Reachability() surface.Reachability { return surface.ReachableSync }

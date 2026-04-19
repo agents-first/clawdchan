@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,8 @@ func TestCLIPairAndSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	binDir := t.TempDir()
-	clawdchan := filepath.Join(binDir, "clawdchan")
-	relay := filepath.Join(binDir, "clawdchan-relay")
+	clawdchan := filepath.Join(binDir, binaryName("clawdchan"))
+	relay := filepath.Join(binDir, binaryName("clawdchan-relay"))
 	if err := goBuild(repoRoot, clawdchan, "./cmd/clawdchan"); err != nil {
 		t.Fatalf("build clawdchan: %v", err)
 	}
@@ -254,4 +255,11 @@ func waitForPort(ctx context.Context, port int) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+func binaryName(base string) string {
+	if runtime.GOOS == "windows" {
+		return base + ".exe"
+	}
+	return base
 }

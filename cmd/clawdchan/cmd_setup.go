@@ -17,12 +17,21 @@ import (
 
 // cmdSetup is the one-command onboarding flow invoked by `make install`.
 // It chains initial config (if missing), project .mcp.json, PATH wiring,
-// and the background daemon install — all with inline prompts and sane
-// defaults. Each step is idempotent and skips cleanly when already done,
-// so rerunning is safe.
+// the optional OpenClaw gateway configuration, and the background daemon
+// install — all with inline prompts and sane defaults. Each step is
+// idempotent and skips cleanly when already done, so rerunning is safe.
+// Everything Claude Code already has is preserved; OpenClaw is purely
+// additive.
 func cmdSetup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
 	yes := fs.Bool("y", false, "assume yes; use defaults everywhere and skip all prompts")
+	// OpenClaw flags let scripted installers (CI, `make install-openclaw`)
+	// configure the gateway without a TTY. Passing -openclaw-url=none clears
+	// a previously-saved setting so a machine can be taken out of OpenClaw
+	// mode without editing config.json by hand.
+	openClawURL := fs.String("openclaw-url", "", "OpenClaw gateway URL (ws:// or wss://); pass 'none' to disable")
+	openClawToken := fs.String("openclaw-token", "", "OpenClaw gateway bearer token")
+	openClawDeviceID := fs.String("openclaw-device-id", "", "OpenClaw device id (default: clawdchan-daemon)")
 	fs.Parse(args)
 
 	// Step 1: identity + config.
@@ -51,7 +60,15 @@ func cmdSetup(args []string) error {
 		fmt.Printf("path-setup: %v\n", err)
 	}
 
-	// Step 4: background daemon.
+	// Step 4: optional OpenClaw wiring. Flags win over prompt. In -y mode with
+	// no flags, we leave the existing config alone — there is no sensible
+	// default OpenClaw URL/token to auto-fill.
+	if err := setupOpenClaw(*yes, *openClawURL, *openClawToken, *openClawDeviceID); err != nil {
+		fmt.Printf("openclaw setup: %v\n", err)
+	}
+
+	// Step 5: background daemon. Runs last so the service unit it writes
+	// picks up the OpenClaw fields we just saved to config.
 	if err := daemonSetup(nil); err != nil {
 		fmt.Printf("daemon setup: %v\n", err)
 	}
@@ -60,6 +77,109 @@ func cmdSetup(args []string) error {
 	fmt.Println("Setup complete. Next:")
 	fmt.Println("  1. Restart Claude Code so it loads the MCP server.")
 	fmt.Println("  2. Ask Claude: 'pair me with <friend> via clawdchan'.")
+	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
+		fmt.Println("  3. OpenClaw config changed — restart the daemon to pick it up:")
+		fmt.Println("     clawdchan daemon install -force")
+	}
+	return nil
+}
+
+// setupOpenClaw wires the optional OpenClaw gateway. Flags override prompts;
+// in -y mode without flags we silently keep whatever is already saved.
+// Passing -openclaw-url=none disables OpenClaw by clearing the config entry.
+// This step never touches Claude Code configuration.
+func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	// Non-interactive: explicit flags provided.
+	if flagURL != "" {
+		if strings.EqualFold(flagURL, "none") {
+			if c.OpenClawURL == "" {
+				fmt.Println("[ok] OpenClaw already disabled")
+				return nil
+			}
+			c.OpenClawURL = ""
+			c.OpenClawToken = ""
+			c.OpenClawDeviceID = ""
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+			fmt.Println("[ok] OpenClaw cleared from config")
+			return nil
+		}
+		c.OpenClawURL = flagURL
+		if flagToken != "" {
+			c.OpenClawToken = flagToken
+		}
+		if flagDeviceID != "" {
+			c.OpenClawDeviceID = flagDeviceID
+		} else if c.OpenClawDeviceID == "" {
+			c.OpenClawDeviceID = "clawdchan-daemon"
+		}
+		if err := saveConfig(c); err != nil {
+			return err
+		}
+		fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", c.OpenClawURL, c.OpenClawDeviceID)
+		return nil
+	}
+
+	// -y with no flags: leave it as-is.
+	if yes || !stdinIsTTY() {
+		if c.OpenClawURL != "" {
+			fmt.Printf("[ok] OpenClaw gateway: %s (unchanged)\n", c.OpenClawURL)
+		}
+		return nil
+	}
+
+	// Interactive: explain, ask, prompt.
+	fmt.Println()
+	if c.OpenClawURL != "" {
+		fmt.Printf("OpenClaw is currently enabled: %s\n", c.OpenClawURL)
+		ok, err := promptYN("Reconfigure or disable OpenClaw? [y/N]: ", false)
+		if err != nil || !ok {
+			fmt.Println("Leaving OpenClaw settings unchanged.")
+			return nil
+		}
+	} else {
+		fmt.Println("OpenClaw integration (optional) — routes inbound envelopes into")
+		fmt.Println("OpenClaw sessions alongside Claude Code. If you're not running an")
+		fmt.Println("OpenClaw gateway on this machine, skip this.")
+		fmt.Println("Your existing Claude Code setup is NOT touched either way.")
+		ok, err := promptYN("Configure OpenClaw now? [y/N]: ", false)
+		if err != nil || !ok {
+			fmt.Println("Skipped. Run `clawdchan setup -openclaw-url=... -openclaw-token=...` later.")
+			return nil
+		}
+	}
+
+	url := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
+	if strings.EqualFold(url, "none") || url == "" {
+		c.OpenClawURL = ""
+		c.OpenClawToken = ""
+		c.OpenClawDeviceID = ""
+		if err := saveConfig(c); err != nil {
+			return err
+		}
+		fmt.Println("[ok] OpenClaw disabled")
+		return nil
+	}
+	token := promptString("OpenClaw bearer token: ", c.OpenClawToken)
+	defaultDevice := c.OpenClawDeviceID
+	if defaultDevice == "" {
+		defaultDevice = "clawdchan-daemon"
+	}
+	device := promptString(fmt.Sprintf("Device id [%s]: ", defaultDevice), defaultDevice)
+
+	c.OpenClawURL = url
+	c.OpenClawToken = token
+	c.OpenClawDeviceID = device
+	if err := saveConfig(c); err != nil {
+		return err
+	}
+	fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", url, device)
 	return nil
 }
 

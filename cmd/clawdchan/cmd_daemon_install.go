@@ -248,6 +248,12 @@ func installWindowsTask(bin string, force bool) error {
 		return fmt.Errorf("binary path contains spaces (%s); install clawdchan to a path without spaces, or create the Scheduled Task manually with Action = %q, Arguments = 'daemon run', Trigger = At log on", bin, bin)
 	}
 
+	// Register the AUMID *before* firing the test notification. Without this
+	// HKCU entry, WinRT rejects CreateToastNotifier with the ClawdChan id.
+	if err := registerWindowsAppID(); err != nil {
+		fmt.Printf("note: AUMID registration failed (%v); toasts will fall back to defaults\n", err)
+	}
+
 	existing := exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run() == nil
 	if existing && !force {
 		fmt.Printf("already installed: task %q (use -force to overwrite)\n", windowsTaskName)
@@ -308,7 +314,7 @@ func verifyTestNotification() {
 	}
 
 	fmt.Println()
-	fmt.Println("macOS / your OS is suppressing the notification despite the delivery API reporting success.")
+	fmt.Println("Your OS is suppressing the notification despite the delivery API reporting success.")
 	fmt.Println("Most common causes:")
 	fmt.Println("  - Focus Mode / Do Not Disturb is on.")
 	fmt.Println("  - The per-app 'Allow Notifications' switch is off for the notifier backend.")
@@ -369,10 +375,12 @@ func daemonUninstall(_ []string) error {
 		if err != nil {
 			if strings.Contains(string(out), "does not exist") || strings.Contains(string(out), "cannot find") {
 				fmt.Println("not installed")
+				_ = unregisterWindowsAppID()
 				return nil
 			}
 			return fmt.Errorf("schtasks /Delete: %w: %s", err, string(out))
 		}
+		_ = unregisterWindowsAppID()
 		fmt.Printf("uninstalled scheduled task %q\n", windowsTaskName)
 		return nil
 	default:

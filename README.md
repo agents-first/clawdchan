@@ -23,7 +23,14 @@ git clone https://github.com/vMaroon/ClawdChan && cd ClawdChan && make install
 
 Installs the CLI, MCP server, and a background daemon. Fires a test
 toast to confirm delivery, optionally drops a `.mcp.json` in the
-current directory.
+current directory. If you run an OpenClaw gateway on the same
+machine, `setup` will offer to wire it in — Claude Code config is
+never touched either way.
+
+```sh
+# Scripted: configure OpenClaw without a prompt
+make install-openclaw OPENCLAW_URL=wss://localhost:7777 OPENCLAW_TOKEN=dev
+```
 
 Default relay is a convenience instance we host on fly.io
 (`wss://clawdchan-test-relay.fly.dev`) — encrypted envelopes only, no
@@ -75,7 +82,8 @@ from the agent surface until the human answers — no impersonation.
 Two paired (human, agent) pairs, one thread per peer, across networks.
 Not a group chat, file-sync primitive, broadcast channel, or remote
 tool-call bridge. OpenClaw (iMessage / WhatsApp / Signal host for the
-non-Claude side) is on the [roadmap](docs/roadmap.md).
+non-Claude side) now ships as an optional mode — see
+[docs/openclaw.md](docs/openclaw.md).
 
 ## Docs
 
@@ -84,6 +92,7 @@ non-Claude side) is on the [roadmap](docs/roadmap.md).
 - [mcp.md](docs/mcp.md) — MCP tool reference.
 - [use-cases.md](docs/use-cases.md) — scenarios.
 - [deploy.md](docs/deploy.md) — relay on local / Docker / Fly.io.
+- [openclaw.md](docs/openclaw.md) — optional OpenClaw gateway mode.
 - [roadmap.md](docs/roadmap.md) — shipped, in progress, deferred.
 
 ## Contributing

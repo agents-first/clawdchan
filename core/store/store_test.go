@@ -83,6 +83,47 @@ func TestPeerCRUD(t *testing.T) {
 	}
 }
 
+func TestOpenClawSessionPersistence(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "clawdchan.db")
+
+	s1, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := identity.Generate()
+	nodeID := id.SigningPublic
+
+	if sid, ok, err := s1.GetOpenClawSession(ctx, nodeID); err != nil {
+		s1.Close()
+		t.Fatal(err)
+	} else if ok || sid != "" {
+		s1.Close()
+		t.Fatalf("expected missing openclaw session, got sid=%q ok=%v", sid, ok)
+	}
+	if err := s1.SetOpenClawSession(ctx, nodeID, "sid-openclaw"); err != nil {
+		s1.Close()
+		t.Fatal(err)
+	}
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	sid, ok, err := s2.GetOpenClawSession(ctx, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || sid != "sid-openclaw" {
+		t.Fatalf("openclaw session roundtrip mismatch: sid=%q ok=%v", sid, ok)
+	}
+}
+
 func TestThreadAndEnvelopes(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()

@@ -18,6 +18,7 @@ type captureHuman struct {
 	mu       sync.Mutex
 	notified []envelope.Envelope
 	reply    envelope.Content
+	askErr   error
 }
 
 func (c *captureHuman) Notify(_ context.Context, _ envelope.ThreadID, env envelope.Envelope) error {
@@ -29,7 +30,7 @@ func (c *captureHuman) Notify(_ context.Context, _ envelope.ThreadID, env envelo
 func (c *captureHuman) Ask(context.Context, envelope.ThreadID, envelope.Envelope) (envelope.Content, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.reply, nil
+	return c.reply, c.askErr
 }
 func (c *captureHuman) Reachability() surface.Reachability                     { return surface.ReachableSync }
 func (c *captureHuman) PresentThread(context.Context, envelope.ThreadID) error { return nil }
@@ -176,4 +177,145 @@ func TestAskHumanRoundTrip(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("alice never received bob's human reply")
+}
+
+func TestAskHumanAsyncReplyDoesNotAutoReply(t *testing.T) {
+	relay := spinRelay(t)
+	alice := mkNode(t, relay, "alice", nil)
+	bobHuman := &captureHuman{
+		reply:  envelope.Content{Kind: envelope.ContentText, Text: "should-not-send"},
+		askErr: surface.ErrAsyncReply,
+	}
+	bob := mkNode(t, relay, "bob", bobHuman)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	if err := bob.Start(ctx); err != nil {
+		t.Fatalf("bob start: %v", err)
+	}
+
+	code, pairCh, err := alice.Pair(ctx)
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := bob.Consume(ctx, code.Mnemonic()); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	res := <-pairCh
+	if res.Err != nil {
+		t.Fatalf("alice pair result: %v", res.Err)
+	}
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "ask-async")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+
+	if err := alice.Send(ctx, thread, envelope.IntentAskHuman, envelope.Content{Kind: envelope.ContentText, Text: "async?"}); err != nil {
+		t.Fatalf("send ask_human: %v", err)
+	}
+
+	noReplyDeadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(noReplyDeadline) {
+		envs, err := alice.ListEnvelopes(ctx, thread, 0)
+		if err != nil {
+			t.Fatalf("list envelopes: %v", err)
+		}
+		for _, e := range envs {
+			if e.From.Role == envelope.RoleHuman {
+				t.Fatalf("unexpected auto human reply: %+v", e)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestHasPendingAsk(t *testing.T) {
+	relay := spinRelay(t)
+	alice := mkNode(t, relay, "alice", nil)
+	bob := mkNode(t, relay, "bob", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	if err := bob.Start(ctx); err != nil {
+		t.Fatalf("bob start: %v", err)
+	}
+
+	code, pairCh, err := alice.Pair(ctx)
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	if _, err := bob.Consume(ctx, code.Mnemonic()); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	res := <-pairCh
+	if res.Err != nil {
+		t.Fatalf("alice pair result: %v", res.Err)
+	}
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "pending-ask")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+
+	if err := alice.Send(ctx, thread, envelope.IntentSay, envelope.Content{Kind: envelope.ContentText, Text: "bootstrap"}); err != nil {
+		t.Fatalf("send bootstrap: %v", err)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		envs, err := bob.ListEnvelopes(ctx, thread, 0)
+		if err == nil && len(envs) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if bob.HasPendingAsk(thread) {
+		t.Fatal("expected no pending ask before ask_human")
+	}
+
+	if err := alice.Send(ctx, thread, envelope.IntentAskHuman, envelope.Content{Kind: envelope.ContentText, Text: "question?"}); err != nil {
+		t.Fatalf("send ask_human: %v", err)
+	}
+
+	deadline = time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if bob.HasPendingAsk(thread) {
+			goto pendingDetected
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("expected pending ask after inbound ask_human")
+
+pendingDetected:
+	if err := bob.SubmitHumanReply(ctx, thread, envelope.Content{Kind: envelope.ContentText, Text: "reply"}); err != nil {
+		t.Fatalf("submit human reply: %v", err)
+	}
+
+	deadline = time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if !bob.HasPendingAsk(thread) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if bob.HasPendingAsk(thread) {
+		t.Fatal("expected pending ask to clear after SubmitHumanReply")
+	}
+
+	if err := bob.Send(ctx, thread, envelope.IntentAskHuman, envelope.Content{Kind: envelope.ContentText, Text: "my own ask"}); err != nil {
+		t.Fatalf("send local ask_human: %v", err)
+	}
+	if bob.HasPendingAsk(thread) {
+		t.Fatal("expected local ask_human not to count as pending inbound ask")
+	}
 }

@@ -71,21 +71,39 @@ still pending.
   inbox digest into Claude's context on each turn, so the agent sees new
   traffic without needing to call `clawdchan_inbox` explicitly.
 
-## Phase 2 — OpenClaw host (planned)
+## Phase 2 — OpenClaw host (shipped)
 
-Status: **not started.**
+Status: **done.**
 
 OpenClaw is a persistent personal-agent runtime with messenger-gateway
-integrations (WhatsApp, Signal, iMessage, etc.). The ClawdChan OpenClaw host
-surfaces `AskHuman` / `NotifyHuman` on the user's configured channel and
-routes their reply back as a signed `role=human` envelope.
+integrations (WhatsApp, Signal, iMessage, etc.). The ClawdChan daemon
+now doubles as an OpenClaw *operator client* over the Gateway Protocol
+WebSocket: each paired peer is mapped to one OpenClaw session, so
+`NotifyHuman`, `AskHuman`, and agent-facing envelopes are rendered into
+the peer's session while OS-toast notifications continue for Claude
+Code. No TypeScript plugin or OpenClaw-side code required.
 
-- `hosts/openclaw/` — HumanSurface backed by the OpenClaw outbound API
-- OpenClaw plugin packaging
-- Mixed-host integration test: CC ↔ OpenClaw
+- `hosts/openclaw/` — `Bridge` (Gateway Protocol WS client with reconnect +
+  subscription replay), `SessionMap` (per-peer session id, cached in
+  SQLite), `HumanSurface`, `AgentSurface`, envelope renderer.
+- `core/surface.ErrAsyncReply` — the one cross-cutting addition: hosts
+  return this when an ask has been delivered out-of-band; the core
+  stops waiting for a synchronous reply. `hosts/claudecode` now uses
+  it too, replacing its previous ad-hoc error.
+- `cmd/clawdchan daemon -openclaw wss://… -openclaw-token …` turns the
+  daemon into an always-on OpenClaw agent. The daemon also reads the
+  same config from `~/.clawdchan/config.json` when the flag is omitted.
+- Interactive setup (`make install`) prompts for OpenClaw once, writes
+  the config, and restarts the service on demand. Scripted installers
+  use `make install-openclaw OPENCLAW_URL=… OPENCLAW_TOKEN=…`. Passing
+  `-openclaw-url=none` disables it again.
+- Full spec: `docs/superpowers/specs/2026-04-19-openclaw-host-design.md`.
+- User guide: `docs/openclaw.md`.
 
-Prerequisite: confirm OpenClaw's plugin runtime supports either an in-process
-Go library or a managed sidecar binary.
+Coexistence with Claude Code: CC config is never removed or replaced.
+The daemon owns the node; the CC MCP server continues to run per-session
+in outbox-writer mode and keeps serving `clawdchan_inbox` / `_reply` /
+`_decline`, so a user can run both surfaces at once.
 
 ## Phase 3 — Follow-ups (deferred)
 

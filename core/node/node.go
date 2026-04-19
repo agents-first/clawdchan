@@ -143,6 +143,33 @@ func (n *Node) RelayURL() string { return n.cfg.RelayURL }
 // Alias returns the node's configured display alias.
 func (n *Node) Alias() string { return n.cfg.Alias }
 
+// Store returns the node's SQLite-backed persistence. Host bindings (e.g.
+// openclaw) reuse it rather than opening a second connection to the same
+// file — SQLite is best with a single handle per process.
+func (n *Node) Store() store.Store { return n.store }
+
+// SetHumanSurface swaps the current human surface. It is safe to call before
+// Start, and during runtime if a host needs to transfer ownership.
+func (n *Node) SetHumanSurface(h surface.HumanSurface) {
+	if h == nil {
+		h = surface.NopHuman{}
+	}
+	n.mu.Lock()
+	n.human = h
+	n.mu.Unlock()
+}
+
+// SetAgentSurface swaps the current agent surface. It is safe to call before
+// Start, and during runtime if a host needs to transfer ownership.
+func (n *Node) SetAgentSurface(a surface.AgentSurface) {
+	if a == nil {
+		a = surface.NopAgent{}
+	}
+	n.mu.Lock()
+	n.agent = a
+	n.mu.Unlock()
+}
+
 // Close releases node resources. After Close, the node is unusable.
 func (n *Node) Close() error {
 	n.Stop()
@@ -198,7 +225,7 @@ func (n *Node) Pair(ctx context.Context) (pairing.Code, <-chan PairResult, error
 	if err != nil {
 		return pairing.Code{}, nil, err
 	}
-	card := pairing.MyCard(n.identity, n.cfg.Alias, n.human.Reachability() != surface.Unreachable)
+	card := pairing.MyCard(n.identity, n.cfg.Alias, n.currentHuman().Reachability() != surface.Unreachable)
 	out := make(chan PairResult, 1)
 	go func() {
 		peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, true)
@@ -221,7 +248,7 @@ func (n *Node) Consume(ctx context.Context, mnemonic string) (pairing.Peer, erro
 	if err != nil {
 		return pairing.Peer{}, err
 	}
-	card := pairing.MyCard(n.identity, n.cfg.Alias, n.human.Reachability() != surface.Unreachable)
+	card := pairing.MyCard(n.identity, n.cfg.Alias, n.currentHuman().Reachability() != surface.Unreachable)
 	peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, false)
 	if err != nil {
 		return pairing.Peer{}, err
@@ -306,6 +333,27 @@ func (n *Node) Send(ctx context.Context, thread envelope.ThreadID, intent envelo
 // routing via WhatsApp).
 func (n *Node) SubmitHumanReply(ctx context.Context, thread envelope.ThreadID, content envelope.Content) error {
 	return n.sendAs(ctx, thread, envelope.RoleHuman, envelope.IntentSay, content)
+}
+
+// HasPendingAsk reports whether thread has at least one inbound ask_human
+// envelope that has not yet been answered by a local role=human reply.
+func (n *Node) HasPendingAsk(thread envelope.ThreadID) bool {
+	envs, err := n.store.ListEnvelopes(context.Background(), thread, 0)
+	if err != nil {
+		return false
+	}
+	me := n.identity.SigningPublic
+	pending := 0
+	for _, e := range envs {
+		if e.Intent == envelope.IntentAskHuman && e.From.NodeID != me {
+			pending++
+			continue
+		}
+		if pending > 0 && e.From.NodeID == me && e.From.Role == envelope.RoleHuman {
+			pending--
+		}
+	}
+	return pending > 0
 }
 
 func (n *Node) sendAs(ctx context.Context, thread envelope.ThreadID, role envelope.Role, intent envelope.Intent, content envelope.Content) error {
@@ -521,23 +569,27 @@ func (n *Node) handleInbound(frame transport.Frame) {
 }
 
 func (n *Node) route(ctx context.Context, env envelope.Envelope) {
+	human, agent := n.currentSurfaces()
 	switch env.Intent {
 	case envelope.IntentNotifyHuman:
-		_ = n.human.Notify(ctx, env.ThreadID, env)
+		_ = human.Notify(ctx, env.ThreadID, env)
 	case envelope.IntentAskHuman:
 		go n.handleAskHuman(env)
 	case envelope.IntentHandoff:
-		_ = n.human.PresentThread(ctx, env.ThreadID)
+		_ = human.PresentThread(ctx, env.ThreadID)
 	default:
-		_ = n.agent.OnMessage(ctx, env)
+		_ = agent.OnMessage(ctx, env)
 	}
 }
 
 func (n *Node) handleAskHuman(env envelope.Envelope) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	reply, err := n.human.Ask(ctx, env.ThreadID, env)
+	reply, err := n.currentHuman().Ask(ctx, env.ThreadID, env)
 	if err != nil {
+		if errors.Is(err, surface.ErrAsyncReply) {
+			return
+		}
 		return
 	}
 	_ = n.SubmitHumanReply(ctx, env.ThreadID, reply)
@@ -636,4 +688,19 @@ func newULID() envelope.ULID {
 	u[5] = byte(ts)
 	_, _ = rand.Read(u[6:])
 	return u
+}
+
+func (n *Node) currentSurfaces() (surface.HumanSurface, surface.AgentSurface) {
+	n.mu.Lock()
+	human := n.human
+	agent := n.agent
+	n.mu.Unlock()
+	return human, agent
+}
+
+func (n *Node) currentHuman() surface.HumanSurface {
+	n.mu.Lock()
+	human := n.human
+	n.mu.Unlock()
+	return human
 }
