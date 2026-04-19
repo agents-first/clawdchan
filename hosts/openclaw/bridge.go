@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,16 +170,17 @@ func (b *Bridge) Connect(ctx context.Context) error {
 }
 
 // SessionCreate creates a new OpenClaw session and returns its session ID.
-func (b *Bridge) SessionCreate(ctx context.Context, name string) (string, error) {
+func (b *Bridge) SessionCreate(ctx context.Context, key string) (string, error) {
 	res, err := b.request(ctx, "sessions.create", map[string]string{
-		"name": name,
+		"key": key,
 	}, nil)
 	if err != nil {
 		return "", err
 	}
 
 	var out struct {
-		SessionID string `json:"session_id"`
+		SessionID string `json:"sessionId"`
+		LegacyID  string `json:"session_id"`
 		SID       string `json:"sid"`
 		ID        string `json:"id"`
 	}
@@ -190,6 +193,8 @@ func (b *Bridge) SessionCreate(ctx context.Context, name string) (string, error)
 	switch {
 	case out.SessionID != "":
 		return out.SessionID, nil
+	case out.LegacyID != "":
+		return out.LegacyID, nil
 	case out.SID != "":
 		return out.SID, nil
 	case out.ID != "":
@@ -646,12 +651,17 @@ func (b *Bridge) handshake(ctx context.Context, conn *websocket.Conn) error {
 		}
 	}
 
-	// Step 2: sign the challenge nonce with the stable device key.
-	signedAt := time.Now().UnixMilli()
-	sig := ed25519.Sign(b.deviceKey, []byte(challengePayload.Nonce))
+	// Step 2: compute device ID and sign the v2 payload with the stable device key.
 	pub := b.deviceKey.Public().(ed25519.PublicKey)
-	pubB64 := base64.StdEncoding.EncodeToString(pub)
-	sigB64 := base64.StdEncoding.EncodeToString(sig)
+	pubHash := sha256.Sum256(pub)
+	actualDeviceID := hex.EncodeToString(pubHash[:])
+	
+	signedAt := time.Now().UnixMilli()
+	payloadStr := fmt.Sprintf("v2|%s|cli|node|operator|operator.read,operator.write|%d|%s|%s", actualDeviceID, signedAt, b.token, challengePayload.Nonce)
+	
+	sig := ed25519.Sign(b.deviceKey, []byte(payloadStr))
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
 
 	// Step 3: send connect with auth token and signed device identity.
 	reqID := strconv.FormatUint(atomic.AddUint64(&b.nextID, 1), 10)
@@ -671,7 +681,7 @@ func (b *Bridge) handshake(ctx context.Context, conn *websocket.Conn) error {
 			"token": b.token,
 		},
 		"device": map[string]any{
-			"id":        b.deviceID,
+			"id":        actualDeviceID,
 			"nonce":     challengePayload.Nonce,
 			"publicKey": pubB64,
 			"signature": sigB64,
