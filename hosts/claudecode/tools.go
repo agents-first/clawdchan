@@ -85,6 +85,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		id := n.Identity()
 		setup := buildSetupStatus(n)
+		startupDigest := buildStartupDigest(ctx, n)
 
 		// Dispatch awareness. When the local daemon has agent-dispatch
 		// configured, inbound collab=true asks are auto-answered by a
@@ -97,14 +98,15 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 		}
 
 		return jsonResult(map[string]any{
-			"version": "0.3",
+			"version": "0.4",
 			"self": map[string]any{
 				"node_id": hex.EncodeToString(id[:]),
 				"alias":   n.Alias(),
 				"relay":   n.RelayURL(),
 			},
-			"setup":    setup,
-			"dispatch": dispatch,
+			"setup":          setup,
+			"startup_digest": startupDigest,
+			"dispatch":       dispatch,
 			"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
 				"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 			"intents": []map[string]string{
@@ -120,6 +122,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 				"Live iterative collab loops belong in a Task sub-agent. Brief it (peer, problem, convergence criterion, max rounds), let it run `clawdchan_message(collab=true)` + `clawdchan_subagent_await` until done, fold its summary into your reply to the user.",
 				"Receiving side, collab=true inbound, no local dispatcher: ask the user once — engage live (spawn your own sub-agent) or reply at their pace.",
 				"ask_human is the peer's human's to answer. Use `clawdchan_reply` with the user's literal words or `clawdchan_decline`. Never compose an answer yourself.",
+				"Session-start unread context is in startup_digest. If unread_total > 0 or pending_asks_total > 0, surface startup_digest.summary_for_injection first.",
 				"The daemon fires OS notifications on inbound. Tell the user you'll surface replies on their next turn — don't implement polling yourself.",
 			},
 			"notes": []string{
@@ -212,6 +215,177 @@ func maybeAttachListenerWarning(n *node.Node) map[string]any {
 		"user_message":              setup["user_message"],
 		"listener_command":          setup["listener_command"],
 	}
+}
+
+// --- startup digest -----------------------------------------------------------
+
+const startupDigestMaxPeers = 10
+
+func buildStartupDigest(ctx context.Context, n *node.Node) map[string]any {
+	threads, err := n.ListThreads(ctx)
+	if err != nil {
+		return startupDigestError(err)
+	}
+	peers, err := n.ListPeers(ctx)
+	if err != nil {
+		return startupDigestError(err)
+	}
+
+	aliasByID := map[identity.NodeID]string{}
+	for _, p := range peers {
+		aliasByID[p.NodeID] = p.Alias
+	}
+
+	type peerUnread struct {
+		peer         identity.NodeID
+		unread       int
+		pendingAsks  int
+		lastActivity int64
+	}
+
+	byPeer := map[identity.NodeID]*peerUnread{}
+	me := n.Identity()
+	unreadTotal := 0
+	pendingAsksTotal := 0
+
+	for _, t := range threads {
+		records, err := n.Store().ListEnvelopeRecords(ctx, t.ID, 0)
+		if err != nil {
+			continue
+		}
+		unread, pending, lastActivity := unreadStatsForThread(records, me)
+		if unread == 0 && pending == 0 {
+			continue
+		}
+		s := byPeer[t.PeerID]
+		if s == nil {
+			s = &peerUnread{peer: t.PeerID}
+			byPeer[t.PeerID] = s
+		}
+		s.unread += unread
+		s.pendingAsks += pending
+		if lastActivity > s.lastActivity {
+			s.lastActivity = lastActivity
+		}
+		unreadTotal += unread
+		pendingAsksTotal += pending
+	}
+
+	rows := make([]peerUnread, 0, len(byPeer))
+	for _, s := range byPeer {
+		rows = append(rows, *s)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].lastActivity == rows[j].lastActivity {
+			return strings.ToLower(aliasByID[rows[i].peer]) < strings.ToLower(aliasByID[rows[j].peer])
+		}
+		return rows[i].lastActivity > rows[j].lastActivity
+	})
+
+	limit := len(rows)
+	if limit > startupDigestMaxPeers {
+		limit = startupDigestMaxPeers
+	}
+	peerOut := make([]map[string]any, 0, limit)
+	for i := 0; i < limit; i++ {
+		r := rows[i]
+		alias := aliasByID[r.peer]
+		if alias == "" {
+			alias = hex.EncodeToString(r.peer[:4])
+		}
+		peerOut = append(peerOut, map[string]any{
+			"peer_id":          hex.EncodeToString(r.peer[:]),
+			"alias":            alias,
+			"unread_count":     r.unread,
+			"pending_asks":     r.pendingAsks,
+			"last_activity_ms": r.lastActivity,
+		})
+	}
+
+	summary := startupDigestSummary(unreadTotal, pendingAsksTotal)
+	return map[string]any{
+		"generated_at_ms":       time.Now().UnixMilli(),
+		"unread_total":          unreadTotal,
+		"pending_asks_total":    pendingAsksTotal,
+		"peers_total":           len(rows),
+		"peers_shown":           len(peerOut),
+		"peers_truncated":       len(rows) - len(peerOut),
+		"summary":               summary,
+		"summary_for_injection": summary,
+		"peers":                 peerOut,
+	}
+}
+
+func startupDigestError(err error) map[string]any {
+	return map[string]any{
+		"generated_at_ms":       time.Now().UnixMilli(),
+		"unread_total":          0,
+		"pending_asks_total":    0,
+		"peers_total":           0,
+		"peers_shown":           0,
+		"peers_truncated":       0,
+		"summary":               "Could not compute unread messages from local store.",
+		"summary_for_injection": "Could not compute unread messages from local store.",
+		"peers":                 []any{},
+		"error":                 err.Error(),
+	}
+}
+
+// unreadStatsForThread computes startup "unread" from one thread.
+// Unread is inbound non-ack traffic newer than the latest local non-ack
+// outbound envelope. Any unanswered ask_human remains unread regardless of
+// timestamp.
+func unreadStatsForThread(records []store.EnvelopeRecord, me identity.NodeID) (unread, pending int, lastActivity int64) {
+	envs := make([]envelope.Envelope, 0, len(records))
+	var latestOutbound int64
+	for _, rec := range records {
+		e := rec.Envelope
+		envs = append(envs, e)
+		if e.Intent == envelope.IntentAck {
+			continue
+		}
+		if e.CreatedAtMs > lastActivity {
+			lastActivity = e.CreatedAtMs
+		}
+		if e.From.NodeID == me && e.CreatedAtMs > latestOutbound {
+			latestOutbound = e.CreatedAtMs
+		}
+	}
+
+	pendingIdx := pendingAsks(envs, me)
+	for _, rec := range records {
+		e := rec.Envelope
+		if e.Intent == envelope.IntentAck || e.From.NodeID == me {
+			continue
+		}
+		if e.CreatedAtMs > latestOutbound || pendingIdx[e.EnvelopeID] {
+			unread++
+		}
+	}
+	return unread, len(pendingIdx), lastActivity
+}
+
+func startupDigestSummary(unreadTotal, pendingTotal int) string {
+	if unreadTotal == 0 && pendingTotal == 0 {
+		return "You have no unread messages."
+	}
+	base := fmt.Sprintf("You have %d unread %s.", unreadTotal, pluralize(unreadTotal, "message", "messages"))
+	if pendingTotal == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s %d pending human %s %s waiting on your answer.",
+		base,
+		pendingTotal,
+		pluralize(pendingTotal, "ask", "asks"),
+		pluralize(pendingTotal, "is", "are"),
+	)
+}
+
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
 }
 
 // --- whoami -----------------------------------------------------------------
