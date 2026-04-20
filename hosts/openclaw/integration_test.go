@@ -36,8 +36,8 @@ func TestIntegrationTwoOpenClawHostsRoundTripAndAskHuman(t *testing.T) {
 	gwA, sendsA := newCapturingGateway(t, "token-a")
 	gwB, sendsB := newCapturingGateway(t, "token-b")
 
-	bridgeA := NewBridge(gwA.wsURL, "token-a", "device-a")
-	bridgeB := NewBridge(gwB.wsURL, "token-b", "device-b")
+	bridgeA := NewBridge(gwA.wsURL, "token-a", "device-a", nil)
+	bridgeB := NewBridge(gwB.wsURL, "token-b", "device-b", nil)
 	t.Cleanup(func() { _ = bridgeA.Close() })
 	t.Cleanup(func() { _ = bridgeB.Close() })
 	if err := bridgeA.Connect(ctx); err != nil {

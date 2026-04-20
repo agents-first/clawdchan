@@ -2,11 +2,18 @@ package openclaw
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -38,7 +45,9 @@ type Msg struct {
 type gatewayMessage struct {
 	Type    string          `json:"type"`
 	ID      string          `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
+	Method  string          `json:"method,omitempty"` // client→server RPC name
+	Event   string          `json:"event,omitempty"`  // server→client event name
+	OK      bool            `json:"ok,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 	Error   *gatewayError   `json:"error,omitempty"`
@@ -76,10 +85,11 @@ func (s *subscription) close() {
 
 // Bridge is a Gateway Protocol WebSocket client for OpenClaw.
 type Bridge struct {
-	wsURL    string
-	token    string
-	deviceID string
-	dialer   *websocket.Dialer
+	wsURL     string
+	token     string
+	deviceID  string
+	deviceKey ed25519.PrivateKey
+	dialer    *websocket.Dialer
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,12 +110,22 @@ type Bridge struct {
 }
 
 // NewBridge creates a new OpenClaw gateway bridge.
-func NewBridge(wsURL, token, deviceID string) *Bridge {
+// deviceKey is the persistent Ed25519 private key for this device; if nil a
+// fresh key is generated (only suitable for ephemeral/test use).
+func NewBridge(wsURL, token, deviceID string, deviceKey ed25519.PrivateKey) *Bridge {
+	if deviceKey == nil {
+		_, k, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			panic("openclaw: generate device key: " + err.Error())
+		}
+		deviceKey = k
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Bridge{
 		wsURL:            wsURL,
 		token:            token,
 		deviceID:         deviceID,
+		deviceKey:        deviceKey,
 		dialer:           &websocket.Dialer{HandshakeTimeout: 10 * time.Second},
 		ctx:              ctx,
 		cancel:           cancel,
@@ -150,16 +170,17 @@ func (b *Bridge) Connect(ctx context.Context) error {
 }
 
 // SessionCreate creates a new OpenClaw session and returns its session ID.
-func (b *Bridge) SessionCreate(ctx context.Context, name string) (string, error) {
+func (b *Bridge) SessionCreate(ctx context.Context, key string) (string, error) {
 	res, err := b.request(ctx, "sessions.create", map[string]string{
-		"name": name,
+		"key": key,
 	}, nil)
 	if err != nil {
 		return "", err
 	}
 
 	var out struct {
-		SessionID string `json:"session_id"`
+		SessionID string `json:"sessionId"`
+		LegacyID  string `json:"session_id"`
 		SID       string `json:"sid"`
 		ID        string `json:"id"`
 	}
@@ -172,6 +193,8 @@ func (b *Bridge) SessionCreate(ctx context.Context, name string) (string, error)
 	switch {
 	case out.SessionID != "":
 		return out.SessionID, nil
+	case out.LegacyID != "":
+		return out.LegacyID, nil
 	case out.SID != "":
 		return out.SID, nil
 	case out.ID != "":
@@ -247,6 +270,9 @@ func (b *Bridge) RunSubscriber(ctx context.Context, sid string, n *node.Node, th
 				return
 			}
 			if msg.Role != "assistant" {
+				continue
+			}
+			if IsClawdChanTurn(msg.Text) {
 				continue
 			}
 
@@ -404,7 +430,7 @@ func (b *Bridge) deliverResponse(msg gatewayMessage) {
 }
 
 func (b *Bridge) deliverEvent(msg gatewayMessage) {
-	if msg.Method != "sessions.messages" {
+	if msg.Event != "sessions.messages" {
 		return
 	}
 
@@ -607,27 +633,60 @@ func (b *Bridge) dialAndHandshake(ctx context.Context) (*websocket.Conn, error) 
 }
 
 func (b *Bridge) handshake(ctx context.Context, conn *websocket.Conn) error {
-	hello, err := readGatewayMessage(ctx, conn)
+	// Step 1: server sends connect.challenge with a nonce.
+	challenge, err := readGatewayMessage(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("openclaw: handshake hello: %w", err)
+		return fmt.Errorf("openclaw: handshake challenge: %w", err)
 	}
-	if hello.Type != "event" || hello.Method != "hello" {
-		return fmt.Errorf("openclaw: expected hello event, got type=%q method=%q", hello.Type, hello.Method)
+	if challenge.Type != "event" || challenge.Event != "connect.challenge" {
+		return fmt.Errorf("openclaw: expected connect.challenge event, got type=%q event=%q", challenge.Type, challenge.Event)
 	}
 
-	var helloPayload struct {
+	var challengePayload struct {
 		Nonce string `json:"nonce"`
 	}
-	if len(hello.Payload) > 0 {
-		if err := json.Unmarshal(hello.Payload, &helloPayload); err != nil {
-			return fmt.Errorf("openclaw: decode hello payload: %w", err)
+	if len(challenge.Payload) > 0 {
+		if err := json.Unmarshal(challenge.Payload, &challengePayload); err != nil {
+			return fmt.Errorf("openclaw: decode challenge payload: %w", err)
 		}
 	}
 
+	// Step 2: compute device ID and sign the v2 payload with the stable device key.
+	pub := b.deviceKey.Public().(ed25519.PublicKey)
+	pubHash := sha256.Sum256(pub)
+	actualDeviceID := hex.EncodeToString(pubHash[:])
+
+	signedAt := time.Now().UnixMilli()
+	payloadStr := fmt.Sprintf("v2|%s|cli|node|operator|operator.read,operator.write|%d|%s|%s", actualDeviceID, signedAt, b.token, challengePayload.Nonce)
+
+	sig := ed25519.Sign(b.deviceKey, []byte(payloadStr))
+	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
+	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
+
+	// Step 3: send connect with auth token and signed device identity.
 	reqID := strconv.FormatUint(atomic.AddUint64(&b.nextID, 1), 10)
-	params, err := marshalRaw(map[string]string{
-		"device_id": b.deviceID,
-		"nonce":     helloPayload.Nonce,
+	params, err := marshalRaw(map[string]any{
+		"minProtocol": 3,
+		"maxProtocol": 3,
+		"client": map[string]any{
+			"id":       "cli",
+			"version":  "1.0.0",
+			"platform": runtime.GOOS,
+			"mode":     "node",
+		},
+		"role":   "operator",
+		"scopes": []string{"operator.read", "operator.write"},
+		"caps":   []string{},
+		"auth": map[string]string{
+			"token": b.token,
+		},
+		"device": map[string]any{
+			"id":        actualDeviceID,
+			"nonce":     challengePayload.Nonce,
+			"publicKey": pubB64,
+			"signature": sigB64,
+			"signedAt":  signedAt,
+		},
 	})
 	if err != nil {
 		return err
@@ -642,13 +701,11 @@ func (b *Bridge) handshake(ctx context.Context, conn *websocket.Conn) error {
 		return fmt.Errorf("openclaw: send connect request: %w", err)
 	}
 
+	// Step 3: wait for res with ok=true (payload.type=="hello-ok").
 	for {
 		msg, err := readGatewayMessage(ctx, conn)
 		if err != nil {
 			return fmt.Errorf("openclaw: wait hello-ok: %w", err)
-		}
-		if msg.Type == "event" && msg.Method == "hello-ok" {
-			return nil
 		}
 		if msg.Type == "res" && msg.ID == reqID {
 			if msg.Error != nil {
@@ -763,6 +820,25 @@ func marshalRaw(v any) (json.RawMessage, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// LoadOrCreateDeviceKey loads a persistent Ed25519 device key from keyPath,
+// creating and saving a new one if the file doesn't exist. The key is stored
+// as raw 64-byte seed+private in binary — opaque to users, only used by the
+// gateway to verify device identity across daemon restarts.
+func LoadOrCreateDeviceKey(keyPath string) (ed25519.PrivateKey, error) {
+	data, err := os.ReadFile(keyPath)
+	if err == nil && len(data) == ed25519.PrivateKeySize {
+		return ed25519.PrivateKey(data), nil
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("openclaw: generate device key: %w", err)
+	}
+	if err := os.WriteFile(keyPath, []byte(priv), 0o600); err != nil {
+		return nil, fmt.Errorf("openclaw: save device key: %w", err)
+	}
+	return priv, nil
 }
 
 func sleepContext(ctx context.Context, d time.Duration) bool {

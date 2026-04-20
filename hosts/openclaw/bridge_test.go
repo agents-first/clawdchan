@@ -77,11 +77,13 @@ func newFakeGateway(t *testing.T, token string, onRequest func(*fakeGatewayClien
 			_ = conn.Close()
 		}()
 
+		// Real OpenClaw protocol: server sends connect.challenge first.
 		if err := g.write(client, gatewayMessage{
-			Type:   "event",
-			Method: "hello",
+			Type:  "event",
+			Event: "connect.challenge",
 			Payload: mustJSON(t, map[string]any{
 				"nonce": "nonce-1",
+				"ts":    0,
 			}),
 		}); err != nil {
 			return
@@ -102,11 +104,13 @@ func newFakeGateway(t *testing.T, token string, onRequest func(*fakeGatewayClien
 			})
 			return
 		}
+		// Real OpenClaw protocol: hello-ok comes as res, not event.
 		if err := g.write(client, gatewayMessage{
-			Type:   "event",
-			Method: "hello-ok",
+			Type: "res",
+			ID:   connectReq.ID,
+			OK:   true,
 			Payload: mustJSON(t, map[string]any{
-				"protocol_version": "1",
+				"type": "hello-ok",
 			}),
 		}); err != nil {
 			return
@@ -212,8 +216,8 @@ func (g *fakeGateway) emitMessage(sid, id, role, text string) {
 			continue
 		}
 		_ = g.write(c, gatewayMessage{
-			Type:   "event",
-			Method: "sessions.messages",
+			Type:  "event",
+			Event: "sessions.messages",
 			Payload: mustJSON(g.t, map[string]any{
 				"session_id": sid,
 				"message": map[string]any{
@@ -273,7 +277,7 @@ func (g *fakeGateway) Close() {
 func TestBridgeHandshakeTokenValidation(t *testing.T) {
 	gw := newFakeGateway(t, "good-token", nil)
 
-	okBridge := NewBridge(gw.wsURL, "good-token", "device-1")
+	okBridge := NewBridge(gw.wsURL, "good-token", "device-1", nil)
 	t.Cleanup(func() { _ = okBridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -282,7 +286,7 @@ func TestBridgeHandshakeTokenValidation(t *testing.T) {
 		t.Fatalf("connect with valid token failed: %v", err)
 	}
 
-	badBridge := NewBridge(gw.wsURL, "wrong-token", "device-2")
+	badBridge := NewBridge(gw.wsURL, "wrong-token", "device-2", nil)
 	ctxBad, cancelBad := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelBad()
 	if err := badBridge.Connect(ctxBad); err == nil {
@@ -341,7 +345,7 @@ func TestBridgeSessionsSendCorrelatesResponsesByID(t *testing.T) {
 		return false
 	})
 
-	bridge := NewBridge(gw.wsURL, "token", "device-1")
+	bridge := NewBridge(gw.wsURL, "token", "device-1", nil)
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -378,7 +382,7 @@ func TestBridgeSessionsSendCorrelatesResponsesByID(t *testing.T) {
 func TestBridgeSubscribeDeliversUntilContextCanceled(t *testing.T) {
 	gw := newFakeGateway(t, "token", nil)
 
-	bridge := NewBridge(gw.wsURL, "token", "device-1")
+	bridge := NewBridge(gw.wsURL, "token", "device-1", nil)
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -419,7 +423,7 @@ func TestBridgeSubscribeDeliversUntilContextCanceled(t *testing.T) {
 func TestBridgeReconnectThenSessionsSendWorks(t *testing.T) {
 	gw := newFakeGateway(t, "token", nil)
 
-	bridge := NewBridge(gw.wsURL, "token", "device-1")
+	bridge := NewBridge(gw.wsURL, "token", "device-1", nil)
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -445,7 +449,7 @@ func TestBridgeReconnectThenSessionsSendWorks(t *testing.T) {
 
 func TestBridgeRunSubscriberRoutesAssistantTurns(t *testing.T) {
 	gw := newFakeGateway(t, "token", nil)
-	bridge := NewBridge(gw.wsURL, "token", "device-1")
+	bridge := NewBridge(gw.wsURL, "token", "device-1", nil)
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
@@ -618,7 +622,7 @@ func TestBridgeSubscribeChannelClosesOnServerSubscriptionFailure(t *testing.T) {
 		return true
 	})
 
-	bridge := NewBridge(gw.wsURL, "token", "device-1")
+	bridge := NewBridge(gw.wsURL, "token", "device-1", nil)
 	t.Cleanup(func() { _ = bridge.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

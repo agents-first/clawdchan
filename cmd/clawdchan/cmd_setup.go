@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -99,6 +102,19 @@ func cmdSetup(args []string) error {
 		fmt.Println("  3. OpenClaw config changed — restart the daemon to pick it up:")
 		fmt.Println("     clawdchan daemon install -force")
 	}
+	// OpenClaw hub guide — printed in addition to the Claude Code steps above
+	// so existing users don't lose the short notice, and new OpenClaw users
+	// see how to drive the hub from natural language.
+	if c, _ := loadConfig(); c.OpenClawURL != "" {
+		fmt.Println()
+		fmt.Println("  OpenClaw:")
+		fmt.Println("    1. Open OpenClaw — you'll see a session named \"clawdchan:hub\".")
+		fmt.Println("    2. To start a pairing, just say: \"pair me with someone on clawdchan\".")
+		fmt.Println("       Your agent replies with 12 words. Send them to your friend.")
+		fmt.Println("    3. When your friend pastes their 12 words, say: \"consume these: <words>\".")
+		fmt.Println("    4. A new session for that peer appears automatically — talk there to chat.")
+		fmt.Println("    Other things you can say in the hub: \"who am I paired with\", \"any new messages\".")
+	}
 	return nil
 }
 
@@ -115,7 +131,16 @@ func stepHeader(n int, title string) {
 // in -y mode without flags we silently keep whatever is already saved.
 // Passing -openclaw-url=none disables OpenClaw by clearing the config entry.
 // This step never touches Claude Code configuration.
-func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
+func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) (err error) {
+	defer func() {
+		if err == nil {
+			c, loadErr := loadConfig()
+			if loadErr == nil && c.OpenClawURL != "" {
+				deployOpenClawAssets(yes)
+			}
+		}
+	}()
+
 	c, err := loadConfig()
 	if err != nil {
 		return err
@@ -153,34 +178,72 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
 		return nil
 	}
 
-	// -y with no flags: leave it as-is.
+	// -y with no flags: auto-discover if nothing configured, else keep.
 	if yes || !stdinIsTTY() {
 		if c.OpenClawURL != "" {
 			fmt.Printf("[ok] OpenClaw gateway: %s (unchanged)\n", c.OpenClawURL)
+			return nil
+		}
+		ws, tok, _ := discoverOpenClaw(context.Background())
+		if ws != "" {
+			c.OpenClawURL = ws
+			c.OpenClawToken = tok
+			if c.OpenClawDeviceID == "" {
+				c.OpenClawDeviceID = "clawdchan-daemon"
+			}
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+			fmt.Printf("[ok] OpenClaw auto-discovered: %s (device=%s)\n", ws, c.OpenClawDeviceID)
 		}
 		return nil
 	}
 
-	// Interactive: short prompt. Explain only if the user opts in — the
-	// setup is re-run often and the paragraph-before-Y/N got grating.
+	// Interactive: try auto-discovery first, fall back to manual.
+	fmt.Println()
 	if c.OpenClawURL != "" {
 		fmt.Printf("  OpenClaw gateway configured: %s\n", c.OpenClawURL)
 		ok, err := promptYN("  Reconfigure or disable? [y/N]: ", false)
 		if err != nil || !ok {
 			return nil
 		}
-	} else {
-		ok, err := promptYN("  Configure OpenClaw gateway? [y/N]: ", false)
-		if err != nil || !ok {
-			fmt.Println("  (not configured)")
-			return nil
-		}
-		fmt.Println("  OpenClaw routes inbound envelopes into OpenClaw sessions alongside Claude Code.")
-		fmt.Println("  Your Claude Code setup is NOT touched either way.")
 	}
 
-	url := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
-	if strings.EqualFold(url, "none") || url == "" {
+	fmt.Print("Checking for OpenClaw gateway... ")
+	ws, tok, _ := discoverOpenClaw(context.Background())
+	if ws != "" {
+		fmt.Printf("found at %s\n", ws)
+		ok, err := promptYN("Use auto-detected gateway? [Y/n]: ", true)
+		if err == nil && ok {
+			c.OpenClawURL = ws
+			c.OpenClawToken = tok
+			if c.OpenClawDeviceID == "" {
+				c.OpenClawDeviceID = "clawdchan-daemon"
+			}
+			if err := saveConfig(c); err != nil {
+				return err
+			}
+			fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", ws, c.OpenClawDeviceID)
+			return nil
+		}
+		// User declined auto-detect — fall through to manual.
+	} else {
+		fmt.Println("not found.")
+	}
+
+	fmt.Println("OpenClaw integration (optional) — routes inbound envelopes into")
+	fmt.Println("OpenClaw sessions alongside Claude Code.")
+	fmt.Println("Your existing Claude Code setup is NOT touched either way.")
+	ok, err := promptYN("Configure OpenClaw manually? [y/N]: ", false)
+	if err != nil || !ok {
+		if c.OpenClawURL == "" {
+			fmt.Println("Skipped. The daemon will auto-detect at startup if available.")
+		}
+		return nil
+	}
+
+	ocURL := promptString("OpenClaw gateway URL (ws:// or wss://, or 'none' to disable): ", c.OpenClawURL)
+	if strings.EqualFold(ocURL, "none") || ocURL == "" {
 		c.OpenClawURL = ""
 		c.OpenClawToken = ""
 		c.OpenClawDeviceID = ""
@@ -197,13 +260,13 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) error {
 	}
 	device := promptString(fmt.Sprintf("Device id [%s]: ", defaultDevice), defaultDevice)
 
-	c.OpenClawURL = url
+	c.OpenClawURL = ocURL
 	c.OpenClawToken = token
 	c.OpenClawDeviceID = device
 	if err := saveConfig(c); err != nil {
 		return err
 	}
-	fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", url, device)
+	fmt.Printf("[ok] OpenClaw gateway: %s (device=%s)\n", ocURL, device)
 	return nil
 }
 
@@ -321,4 +384,137 @@ func promptString(prompt, defaultVal string) string {
 		return defaultVal
 	}
 	return ans
+}
+
+const clawdchanGuideMarkdown = `# ClawdChan Guide
+
+You are equipped with the **ClawdChan MCP Toolkit**, which allows you to communicate with other agents and humans over an end-to-end encrypted protocol.
+
+## Core Concepts
+- **Node:** Your local ClawdChan identity.
+- **Peer:** A remote contact (human or agent).
+- **Pairing Code:** A 128-bit code (shown as 12 BIP39 words) used to establish a secure connection.
+- **Mnemonic:** A 12-word recovery phrase for your identity.
+
+## Available Tools
+- ` + "`" + `clawdchan_whoami` + "`" + `: Check your own Node ID and display alias.
+- ` + "`" + `clawdchan_pair` + "`" + `: Generate a pairing code or consume one provided by a user.
+- ` + "`" + `clawdchan_peers` + "`" + `: List your currently paired contacts.
+- ` + "`" + `clawdchan_message` + "`" + `: Send a message to a paired peer.
+- ` + "`" + `clawdchan_inbox` + "`" + `: Check for incoming messages and pending requests.
+- ` + "`" + `clawdchan_reply` + "`" + ` / ` + "`" + `clawdchan_decline` + "`" + `: Respond to structured requests from peers.
+
+## How to Pair with Someone
+1. **To let someone pair with you:**
+   - Call ` + "`" + `clawdchan_pair` + "`" + ` with no arguments. 
+   - It will return a 12-word code. 
+   - Give these words to the person you want to pair with.
+2. **To pair with someone else's code:**
+   - Ask the user for their 12-word pairing code.
+   - Call ` + "`" + `clawdchan_pair` + "`" + ` and pass those 12 words as the ` + "`" + `code` + "`" + ` parameter.
+
+## Important Notes
+- ClawdChan messages are end-to-end encrypted.
+- You can talk to humans using Claude Code or other OpenClaw instances.
+`
+
+func deployOpenClawAssets(yes bool) {
+	deployOpenClawAgentAssets()
+	_ = registerClawdChanMCP()
+	if !yes && stdinIsTTY() {
+		restartOpenClawGateway()
+	}
+}
+
+func deployOpenClawAgentAssets() {
+	home, _ := os.UserHomeDir()
+	ocPath := filepath.Join(home, ".openclaw", "openclaw.json")
+	data, err := os.ReadFile(ocPath)
+	if err != nil {
+		return
+	}
+
+	var ocConfig struct {
+		Agents struct {
+			Defaults struct {
+				Workspace string `json:"workspace"`
+			} `json:"defaults"`
+			List []struct {
+				Workspace string `json:"workspace"`
+			} `json:"list"`
+		} `json:"agents"`
+	}
+
+	if err := json.Unmarshal(data, &ocConfig); err != nil {
+		return
+	}
+
+	workspaces := make(map[string]bool)
+	if ocConfig.Agents.Defaults.Workspace != "" {
+		workspaces[ocConfig.Agents.Defaults.Workspace] = true
+	}
+	for _, a := range ocConfig.Agents.List {
+		if a.Workspace != "" {
+			workspaces[a.Workspace] = true
+		}
+	}
+
+	count := 0
+	for ws := range workspaces {
+		guidePath := filepath.Join(ws, "CLAWDCHAN_GUIDE.md")
+		_ = os.WriteFile(guidePath, []byte(clawdchanGuideMarkdown), 0o644)
+
+		soulPath := filepath.Join(ws, "SOUL.md")
+		soulData, err := os.ReadFile(soulPath)
+		if err == nil && !strings.Contains(string(soulData), "ClawdChan") {
+			f, err := os.OpenFile(soulPath, os.O_APPEND|os.O_WRONLY, 0o644)
+			if err == nil {
+				_, _ = f.WriteString("\n\n## ClawdChan\n\nYou are a ClawdChan-enabled agent. You can communicate securely with other agents and humans globally. Use `clawdchan_pair` to connect with new peers and `clawdchan_message` to talk to them. Refer to `CLAWDCHAN_GUIDE.md` for tool specifics.\n")
+				f.Close()
+			}
+		}
+		count++
+	}
+
+	if count > 0 {
+		fmt.Printf("[ok] Deployed ClawdChan guide to %d OpenClaw agent workspace(s)\n", count)
+	}
+}
+
+func registerClawdChanMCP() error {
+	mcpBin, err := resolveMCPBinary()
+	if err != nil {
+		return err
+	}
+
+	// Create JSON command object for 'openclaw mcp set'
+	cmdObj := map[string]string{
+		"command": mcpBin,
+	}
+	raw, _ := json.Marshal(cmdObj)
+
+	cmd := exec.Command("openclaw", "mcp", "set", "clawdchan", string(raw))
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	fmt.Println("[ok] Registered ClawdChan MCP server in OpenClaw")
+	return nil
+}
+
+func restartOpenClawGateway() {
+	fmt.Println()
+	fmt.Println("OpenClaw configuration has changed.")
+	ok, err := promptYN("Restart OpenClaw Gateway now to apply changes? [Y/n]: ", true)
+	if err != nil || !ok {
+		fmt.Println("Skipped restart. Remember to run `openclaw gateway restart` later.")
+		return
+	}
+
+	fmt.Print("Restarting OpenClaw gateway... ")
+	cmd := exec.Command("openclaw", "gateway", "restart")
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("failed: %v\n", err)
+		return
+	}
+	fmt.Println("done.")
 }
