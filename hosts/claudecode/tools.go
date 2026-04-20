@@ -466,7 +466,7 @@ func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 		deadline := time.Now().Add(time.Duration(wait * float64(time.Second)))
 		const pollInterval = 400 * time.Millisecond
 		for {
-			out, anyTraffic, hasPending, hasCollab, nowMs, err := collectInbox(ctx, n, since, headersOnly)
+			out, anyTraffic, hasPending, hasCollab, hasUndeliveredOutbound, nowMs, err := collectInbox(ctx, n, since, headersOnly)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -476,7 +476,7 @@ func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 					"peers":  out,
 				}
 				if !notesSeen {
-					resp["notes"] = inboxNotes(hasPending, hasCollab)
+					resp["notes"] = inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound)
 				}
 				return jsonResult(resp), nil
 			}
@@ -497,13 +497,18 @@ func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 // inboxNotes fires a note only when it's relevant to the response payload.
 // Keeps the guidance dense and stops the agent from re-reading the same
 // four reminders on every poll.
-func inboxNotes(hasPending, hasCollab bool) []string {
+const outboundStatusNote = "Outbound messages show status (queued/sent/delivered). 'queued' means it hasn't left your machine; 'sent' means the relay has it but the peer hasn't acked; 'delivered' means the peer's node stored and signed for it. Persistent 'sent' across hours likely means the peer is offline."
+
+func inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound bool) []string {
 	var notes []string
 	if hasPending {
 		notes = append(notes, "pending_asks carry the peer's ask_human verbatim. Present to the user, then clawdchan_reply with their literal words or clawdchan_decline. Do not compose an answer yourself.")
 	}
 	if hasCollab {
 		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting. If their side has no dispatcher, ask the user whether to engage live or reply at their own pace.")
+	}
+	if hasUndeliveredOutbound {
+		notes = append(notes, outboundStatusNote)
 	}
 	return notes
 }
@@ -512,10 +517,10 @@ func inboxNotes(hasPending, hasCollab bool) []string {
 // whether any pending_asks are present and whether any visible envelope
 // carries the collab marker, so the caller can attach only the notes
 // that are contextually relevant.
-func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bool) ([]map[string]any, bool, bool, bool, int64, error) {
+func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bool) ([]map[string]any, bool, bool, bool, bool, int64, error) {
 	threads, err := n.ListThreads(ctx)
 	if err != nil {
-		return nil, false, false, false, 0, err
+		return nil, false, false, false, false, 0, err
 	}
 	me := n.Identity()
 
@@ -525,12 +530,16 @@ func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bo
 		lastActivity int64
 	}
 	buckets := map[identity.NodeID]*bucket{}
-	hasPending, hasCollab := false, false
+	hasPending, hasCollab, hasUndeliveredOutbound := false, false, false
 
 	for _, t := range threads {
-		envs, err := n.ListEnvelopes(ctx, t.ID, 0)
+		records, err := n.Store().ListEnvelopeRecords(ctx, t.ID, 0)
 		if err != nil {
 			continue
+		}
+		envs := make([]envelope.Envelope, 0, len(records))
+		for _, rec := range records {
+			envs = append(envs, rec.Envelope)
 		}
 		pending := pendingAsks(envs, me)
 		b := buckets[t.PeerID]
@@ -538,19 +547,26 @@ func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bo
 			b = &bucket{}
 			buckets[t.PeerID] = b
 		}
-		for _, e := range envs {
+		for _, rec := range records {
+			e := rec.Envelope
+			if e.Intent == envelope.IntentAck {
+				continue
+			}
 			if e.CreatedAtMs > b.lastActivity {
 				b.lastActivity = e.CreatedAtMs
 			}
 			if pending[e.EnvelopeID] {
-				b.pendingAsks = append(b.pendingAsks, serializeEnvelope(e, me, false))
+				b.pendingAsks = append(b.pendingAsks, serializeEnvelope(e, me, false, &rec))
 				hasPending = true
 				continue
 			}
 			if e.CreatedAtMs > since {
-				rendered := serializeEnvelope(e, me, headersOnly)
+				rendered := serializeEnvelope(e, me, headersOnly, &rec)
 				if c, ok := rendered["collab"].(bool); ok && c {
 					hasCollab = true
+				}
+				if e.From.NodeID == me && rec.Status != store.StatusDelivered {
+					hasUndeliveredOutbound = true
 				}
 				b.envelopes = append(b.envelopes, rendered)
 			}
@@ -582,7 +598,7 @@ func collectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bo
 		aj, _ := out[j]["last_activity_ms"].(int64)
 		return ai > aj
 	})
-	return out, haveAny, hasPending, hasCollab, time.Now().UnixMilli(), nil
+	return out, haveAny, hasPending, hasCollab, hasUndeliveredOutbound, time.Now().UnixMilli(), nil
 }
 
 // --- subagent_await (live collab primitive) -------------------------------
@@ -683,7 +699,7 @@ func awaitResult(ctx context.Context, n *node.Node, tid envelope.ThreadID, envs 
 	for _, e := range envs {
 		if pending[e.EnvelopeID] {
 			pendingIDs = append(pendingIDs, hex.EncodeToString(e.EnvelopeID[:]))
-			stub := serializeEnvelope(e, me, false)
+			stub := serializeEnvelope(e, me, false, nil)
 			stub["content"] = map[string]any{
 				"kind": "text",
 				"text": "[redacted: ask_human awaiting human reply; use clawdchan_inbox then clawdchan_reply/clawdchan_decline]",
@@ -691,7 +707,7 @@ func awaitResult(ctx context.Context, n *node.Node, tid envelope.ThreadID, envs 
 			serialized = append(serialized, stub)
 			continue
 		}
-		serialized = append(serialized, serializeEnvelope(e, me, false))
+		serialized = append(serialized, serializeEnvelope(e, me, false, nil))
 	}
 	out := map[string]any{
 		"envelopes": serialized,
@@ -1171,7 +1187,18 @@ func contentPayload(c envelope.Content) map[string]any {
 // Content.Title is the reserved CollabSyncTitle — no title pattern-match
 // needed). headersOnly drops the content body for cheap polling over
 // long threads.
-func serializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool) map[string]any {
+func statusName(s store.DeliveryStatus) string {
+	switch s {
+	case store.StatusSent:
+		return "sent"
+	case store.StatusDelivered:
+		return "delivered"
+	default:
+		return "queued"
+	}
+}
+
+func serializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool, rec *store.EnvelopeRecord) map[string]any {
 	dir := "in"
 	if e.From.NodeID == me {
 		dir = "out"
@@ -1189,6 +1216,22 @@ func serializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool
 	}
 	if !headersOnly {
 		out["content"] = contentPayload(e.Content)
+	}
+	if dir == "out" {
+		status := store.StatusQueued
+		var sentAtMs, deliveredAtMs int64
+		if rec != nil {
+			status = rec.Status
+			sentAtMs = rec.SentAtMs
+			deliveredAtMs = rec.DeliveredAtMs
+		}
+		out["status"] = statusName(status)
+		if status != store.StatusQueued {
+			out["sent_at_ms"] = sentAtMs
+		}
+		if status == store.StatusDelivered {
+			out["delivered_at_ms"] = deliveredAtMs
+		}
 	}
 	return out
 }

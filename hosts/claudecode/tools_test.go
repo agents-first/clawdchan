@@ -1,10 +1,15 @@
 package claudecode
 
 import (
+	"context"
+	"encoding/hex"
 	"testing"
 
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/identity"
+	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/vMaroon/ClawdChan/core/store"
 )
 
 // TestPendingAsks verifies the ask_human enforcement invariant: a remote
@@ -91,7 +96,7 @@ func TestSerializeEnvelopeDirection(t *testing.T) {
 		Content:     envelope.Content{Kind: envelope.ContentDigest, Title: "clawdchan:collab_sync", Body: "live"},
 	}
 
-	in := serializeEnvelope(plain, me, false)
+	in := serializeEnvelope(plain, me, false, nil)
 	if in["direction"] != "in" || in["collab"] != false {
 		t.Fatalf("plain peer envelope: direction=%v collab=%v", in["direction"], in["collab"])
 	}
@@ -99,12 +104,12 @@ func TestSerializeEnvelopeDirection(t *testing.T) {
 		t.Fatalf("full render should include content, got %v", in["content"])
 	}
 
-	out := serializeEnvelope(collab, me, false)
+	out := serializeEnvelope(collab, me, false, nil)
 	if out["direction"] != "out" || out["collab"] != true {
 		t.Fatalf("self collab envelope: direction=%v collab=%v", out["direction"], out["collab"])
 	}
 
-	hdr := serializeEnvelope(plain, me, true)
+	hdr := serializeEnvelope(plain, me, true, nil)
 	if _, has := hdr["content"]; has {
 		t.Fatalf("headers mode should omit content, got %v", hdr["content"])
 	}
@@ -196,4 +201,252 @@ func TestParseMessageIntent(t *testing.T) {
 			t.Errorf("parseMessageIntent(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
+}
+
+func TestInbox_OutboundEnvelopesCarryStatus(t *testing.T) {
+	ctx := context.Background()
+	n, peer, tid := setupInboxTestNode(t)
+	me := n.Identity()
+
+	inbound := testEnvelope(0x01, tid, peer, envelope.RoleAgent, envelope.IntentSay, 100)
+	outQueued := testEnvelope(0x02, tid, me, envelope.RoleAgent, envelope.IntentSay, 200)
+	outSent := testEnvelope(0x03, tid, me, envelope.RoleAgent, envelope.IntentSay, 300)
+
+	appendInboxEnvelope(t, n, inbound)
+	appendInboxEnvelope(t, n, outQueued)
+	appendInboxEnvelope(t, n, outSent)
+	if err := n.Store().MarkEnvelopeSent(ctx, outSent.EnvelopeID, 350); err != nil {
+		t.Fatalf("MarkEnvelopeSent: %v", err)
+	}
+
+	peers, _, _, _, _, _, err := collectInbox(ctx, n, 0, false)
+	if err != nil {
+		t.Fatalf("collectInbox: %v", err)
+	}
+	envs := mustPeerEnvelopes(t, peers)
+	gotByID := map[string]map[string]any{}
+	for _, e := range envs {
+		gotByID[e["envelope_id"].(string)] = e
+	}
+
+	if gotByID[hex.EncodeToString(inbound.EnvelopeID[:])]["direction"] != "in" {
+		t.Fatalf("inbound direction = %v, want in", gotByID[hex.EncodeToString(inbound.EnvelopeID[:])]["direction"])
+	}
+	if _, ok := gotByID[hex.EncodeToString(inbound.EnvelopeID[:])]["status"]; ok {
+		t.Fatalf("inbound envelope unexpectedly has status: %v", gotByID[hex.EncodeToString(inbound.EnvelopeID[:])])
+	}
+
+	queued := gotByID[hex.EncodeToString(outQueued.EnvelopeID[:])]
+	if queued["status"] != "queued" {
+		t.Fatalf("queued outbound status = %v, want queued", queued["status"])
+	}
+	if _, ok := queued["sent_at_ms"]; ok {
+		t.Fatalf("queued outbound unexpectedly has sent_at_ms: %v", queued["sent_at_ms"])
+	}
+	if _, ok := queued["delivered_at_ms"]; ok {
+		t.Fatalf("queued outbound unexpectedly has delivered_at_ms: %v", queued["delivered_at_ms"])
+	}
+
+	sent := gotByID[hex.EncodeToString(outSent.EnvelopeID[:])]
+	if sent["status"] != "sent" {
+		t.Fatalf("sent outbound status = %v, want sent", sent["status"])
+	}
+	if sent["sent_at_ms"] != int64(350) {
+		t.Fatalf("sent outbound sent_at_ms = %v, want 350", sent["sent_at_ms"])
+	}
+	if _, ok := sent["delivered_at_ms"]; ok {
+		t.Fatalf("sent outbound unexpectedly has delivered_at_ms: %v", sent["delivered_at_ms"])
+	}
+}
+
+func TestInbox_DeliveredOutboundHasTimestamp(t *testing.T) {
+	ctx := context.Background()
+	n, _, tid := setupInboxTestNode(t)
+	me := n.Identity()
+	out := testEnvelope(0x11, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
+	appendInboxEnvelope(t, n, out)
+	if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 150); err != nil {
+		t.Fatalf("MarkEnvelopeSent: %v", err)
+	}
+	if err := n.Store().MarkEnvelopeDelivered(ctx, out.EnvelopeID, 200); err != nil {
+		t.Fatalf("MarkEnvelopeDelivered: %v", err)
+	}
+
+	peers, _, _, _, _, _, err := collectInbox(ctx, n, 0, false)
+	if err != nil {
+		t.Fatalf("collectInbox: %v", err)
+	}
+	envs := mustPeerEnvelopes(t, peers)
+	if len(envs) != 1 {
+		t.Fatalf("len(envelopes) = %d, want 1", len(envs))
+	}
+	got := envs[0]
+	if got["status"] != "delivered" {
+		t.Fatalf("status = %v, want delivered", got["status"])
+	}
+	if got["sent_at_ms"] != int64(150) {
+		t.Fatalf("sent_at_ms = %v, want 150", got["sent_at_ms"])
+	}
+	if got["delivered_at_ms"] != int64(200) {
+		t.Fatalf("delivered_at_ms = %v, want 200", got["delivered_at_ms"])
+	}
+}
+
+func TestInbox_FiltersIntentAck(t *testing.T) {
+	ctx := context.Background()
+	n, peer, tid := setupInboxTestNode(t)
+	me := n.Identity()
+
+	visible := testEnvelope(0x21, tid, peer, envelope.RoleAgent, envelope.IntentSay, 100)
+	ack := testEnvelope(0x22, tid, peer, envelope.RoleAgent, envelope.IntentAck, 200)
+	appendInboxEnvelope(t, n, visible)
+	appendInboxEnvelope(t, n, ack)
+
+	peers, _, _, _, _, _, err := collectInbox(ctx, n, 0, false)
+	if err != nil {
+		t.Fatalf("collectInbox: %v", err)
+	}
+	envs := mustPeerEnvelopes(t, peers)
+	if len(envs) != 1 {
+		t.Fatalf("len(envelopes) = %d, want 1", len(envs))
+	}
+	if envs[0]["intent"] != "say" {
+		t.Fatalf("visible envelope intent = %v, want say", envs[0]["intent"])
+	}
+	for _, e := range envs {
+		if e["intent"] == "ack" {
+			t.Fatalf("ack envelope leaked into inbox output: %v", e)
+		}
+	}
+
+	// Ensure outbound delivery metadata remains absent on inbound envelopes.
+	if envs[0]["direction"] != "in" {
+		t.Fatalf("direction = %v, want in", envs[0]["direction"])
+	}
+	if _, ok := envs[0]["status"]; ok {
+		t.Fatalf("inbound envelope unexpectedly has status: %v", envs[0])
+	}
+	if me == peer {
+		t.Fatal("test setup invalid: me and peer are equal")
+	}
+}
+
+func TestInbox_NoteFiresOnlyForUnfinishedOutbound(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("fires for sent outbound", func(t *testing.T) {
+		n, _, tid := setupInboxTestNode(t)
+		me := n.Identity()
+		out := testEnvelope(0x31, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
+		appendInboxEnvelope(t, n, out)
+		if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 120); err != nil {
+			t.Fatalf("MarkEnvelopeSent: %v", err)
+		}
+		_, _, hasPending, hasCollab, hasUndeliveredOutbound, _, err := collectInbox(ctx, n, 0, false)
+		if err != nil {
+			t.Fatalf("collectInbox: %v", err)
+		}
+		notes := inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound)
+		if !containsNote(notes, outboundStatusNote) {
+			t.Fatalf("status note missing; notes=%v", notes)
+		}
+	})
+
+	t.Run("does not fire when all outbound are delivered", func(t *testing.T) {
+		n, _, tid := setupInboxTestNode(t)
+		me := n.Identity()
+		out := testEnvelope(0x32, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
+		appendInboxEnvelope(t, n, out)
+		if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 120); err != nil {
+			t.Fatalf("MarkEnvelopeSent: %v", err)
+		}
+		if err := n.Store().MarkEnvelopeDelivered(ctx, out.EnvelopeID, 130); err != nil {
+			t.Fatalf("MarkEnvelopeDelivered: %v", err)
+		}
+		_, _, hasPending, hasCollab, hasUndeliveredOutbound, _, err := collectInbox(ctx, n, 0, false)
+		if err != nil {
+			t.Fatalf("collectInbox: %v", err)
+		}
+		notes := inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound)
+		if containsNote(notes, outboundStatusNote) {
+			t.Fatalf("status note should not fire; notes=%v", notes)
+		}
+	})
+}
+
+func setupInboxTestNode(t *testing.T) (*node.Node, identity.NodeID, envelope.ThreadID) {
+	t.Helper()
+	n, err := node.New(node.Config{
+		DataDir:  t.TempDir(),
+		RelayURL: "ws://127.0.0.1:8787",
+		Alias:    "me",
+	})
+	if err != nil {
+		t.Fatalf("node.New: %v", err)
+	}
+	t.Cleanup(func() { _ = n.Close() })
+
+	var peer identity.NodeID
+	peer[0] = 0xBB
+	if err := n.Store().UpsertPeer(context.Background(), pairing.Peer{
+		NodeID:         peer,
+		Alias:          "peer",
+		HumanReachable: true,
+		Trust:          pairing.TrustPaired,
+		PairedAtMs:     1,
+	}); err != nil {
+		t.Fatalf("UpsertPeer: %v", err)
+	}
+
+	var tid envelope.ThreadID
+	tid[0] = 0xAB
+	if err := n.Store().CreateThread(context.Background(), store.Thread{
+		ID:        tid,
+		PeerID:    peer,
+		Topic:     "test",
+		CreatedMs: 1,
+	}); err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	return n, peer, tid
+}
+
+func testEnvelope(id byte, tid envelope.ThreadID, from identity.NodeID, role envelope.Role, intent envelope.Intent, createdAt int64) envelope.Envelope {
+	return envelope.Envelope{
+		Version:     envelope.Version,
+		EnvelopeID:  envelope.ULID{id},
+		ThreadID:    tid,
+		From:        envelope.Principal{NodeID: from, Role: role, Alias: "x"},
+		Intent:      intent,
+		CreatedAtMs: createdAt,
+		Content:     envelope.Content{Kind: envelope.ContentText, Text: "msg"},
+	}
+}
+
+func appendInboxEnvelope(t *testing.T, n *node.Node, env envelope.Envelope) {
+	t.Helper()
+	if err := n.Store().AppendEnvelope(context.Background(), env, true); err != nil {
+		t.Fatalf("AppendEnvelope(%x): %v", env.EnvelopeID[:], err)
+	}
+}
+
+func mustPeerEnvelopes(t *testing.T, peers []map[string]any) []map[string]any {
+	t.Helper()
+	if len(peers) != 1 {
+		t.Fatalf("len(peers) = %d, want 1", len(peers))
+	}
+	envs, ok := peers[0]["envelopes"].([]map[string]any)
+	if !ok {
+		t.Fatalf("peer envelopes type = %T, want []map[string]any", peers[0]["envelopes"])
+	}
+	return envs
+}
+
+func containsNote(notes []string, needle string) bool {
+	for _, note := range notes {
+		if note == needle {
+			return true
+		}
+	}
+	return false
 }
