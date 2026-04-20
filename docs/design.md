@@ -71,6 +71,17 @@ do not forward.
 | `Ack`         | Lightweight delivery ack, rarely surfaced. |
 | `Close`       | End of thread. |
 
+### IntentAck semantics
+
+`IntentAck` references the acknowledged envelope via `parent_id` (the
+acknowledged envelope's `envelope_id`). Receiving nodes emit an `IntentAck` for
+every verified, policy-admitted, persisted inbound envelope whose intent is not
+`IntentAck`.
+
+Ack envelopes are signed, sealed, queued, retried, and delivered through the
+same machinery as any other envelope. They are transport-level delivery
+metadata and are usually filtered out of human-facing conversation views.
+
 `NotifyHuman` / `AskHuman` are **requests** to the receiving node. The
 receiving node's local policy decides whether to honor them, rate-limit them,
 or reject with a signed `policy_denied` envelope. The sending agent cannot
