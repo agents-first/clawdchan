@@ -330,6 +330,29 @@ func TestCLIStatusGlyph(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// Alice also needs a long-running node process to receive the ack
+	// bob emits. Without it, alice send is a one-shot that exits before
+	// the ack arrives and alice threads never reads the updated status.
+	aliceListen := exec.CommandContext(ctx, clawdchan, "listen")
+	aliceListen.Env = append(os.Environ(), "CLAWDCHAN_HOME="+alice)
+	aliceListenOut := &bytes.Buffer{}
+	aliceListen.Stdout = aliceListenOut
+	aliceListen.Stderr = aliceListenOut
+	if err := aliceListen.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = aliceListen.Process.Signal(os.Interrupt)
+		_, _ = aliceListen.Process.Wait()
+	}()
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(aliceListenOut.String(), "listening") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	threadOut, err := run(alice, "open", bobID, "-topic", "status-glyph")
 	if err != nil {
 		t.Fatalf("alice open: %v\n%s", err, threadOut)
