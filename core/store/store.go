@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -43,6 +44,10 @@ type Store interface {
 
 	AppendEnvelope(ctx context.Context, env envelope.Envelope, delivered bool) error
 	ListEnvelopes(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]envelope.Envelope, error)
+	MarkEnvelopeSent(ctx context.Context, id envelope.ULID, sentAtMs int64) error
+	MarkEnvelopeDelivered(ctx context.Context, id envelope.ULID, deliveredAtMs int64) error
+	GetOutboundEnvelope(ctx context.Context, id envelope.ULID) (env envelope.Envelope, peer identity.NodeID, ok bool, err error)
+	ListEnvelopeRecords(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]EnvelopeRecord, error)
 
 	EnqueueOutbox(ctx context.Context, peer identity.NodeID, env envelope.Envelope) error
 	DrainOutbox(ctx context.Context, peer identity.NodeID) ([]envelope.Envelope, error)
@@ -62,6 +67,21 @@ type Thread struct {
 	PeerID    identity.NodeID
 	Topic     string
 	CreatedMs int64
+}
+
+type DeliveryStatus uint8
+
+const (
+	StatusQueued DeliveryStatus = iota
+	StatusSent
+	StatusDelivered
+)
+
+type EnvelopeRecord struct {
+	Envelope      envelope.Envelope
+	Status        DeliveryStatus
+	SentAtMs      int64
+	DeliveredAtMs int64
 }
 
 // ErrNotFound is returned by getters when a row does not exist.
@@ -116,6 +136,12 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE INDEX IF NOT EXISTS outbox_peer ON outbox(peer_node);
 `
 
+var envelopeStatusMigrationStatements = []string{
+	`ALTER TABLE envelopes ADD COLUMN status INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE envelopes ADD COLUMN sent_at_ms INTEGER`,
+	`ALTER TABLE envelopes ADD COLUMN delivered_at_ms INTEGER`,
+}
+
 type sqliteStore struct {
 	db *sql.DB
 }
@@ -133,6 +159,10 @@ func Open(path string) (Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := applyEnvelopeStatusMigration(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate envelope status columns: %w", err)
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS openclaw_sessions (
 		node_id    BLOB PRIMARY KEY,
@@ -341,22 +371,118 @@ func (s *sqliteStore) AppendEnvelope(ctx context.Context, env envelope.Envelope,
 }
 
 func (s *sqliteStore) ListEnvelopes(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]envelope.Envelope, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT blob FROM envelopes WHERE thread_id = ? AND created_ms > ? ORDER BY created_ms ASC`, thread[:], sinceMs)
+	records, err := s.ListEnvelopeRecords(ctx, thread, sinceMs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]envelope.Envelope, 0, len(records))
+	for _, rec := range records {
+		out = append(out, rec.Envelope)
+	}
+	return out, nil
+}
+
+func (s *sqliteStore) MarkEnvelopeSent(ctx context.Context, id envelope.ULID, sentAtMs int64) error {
+	res, err := s.db.ExecContext(ctx, `
+        UPDATE envelopes
+        SET status = ?, sent_at_ms = COALESCE(sent_at_ms, ?)
+        WHERE envelope_id = ?
+          AND from_node = (SELECT sign_pub FROM identity WHERE id = 1)
+          AND status < ?
+    `, int(StatusSent), sentAtMs, id[:], int(StatusSent))
+	if err != nil {
+		return err
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated > 0 {
+		return nil
+	}
+	return s.ensureOutboundEnvelopeExists(ctx, id)
+}
+
+func (s *sqliteStore) MarkEnvelopeDelivered(ctx context.Context, id envelope.ULID, deliveredAtMs int64) error {
+	res, err := s.db.ExecContext(ctx, `
+        UPDATE envelopes
+        SET status = ?, delivered_at_ms = COALESCE(delivered_at_ms, ?)
+        WHERE envelope_id = ?
+          AND from_node = (SELECT sign_pub FROM identity WHERE id = 1)
+          AND status < ?
+    `, int(StatusDelivered), deliveredAtMs, id[:], int(StatusDelivered))
+	if err != nil {
+		return err
+	}
+	updated, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated > 0 {
+		return nil
+	}
+	return s.ensureOutboundEnvelopeExists(ctx, id)
+}
+
+func (s *sqliteStore) GetOutboundEnvelope(ctx context.Context, id envelope.ULID) (env envelope.Envelope, peer identity.NodeID, ok bool, err error) {
+	row := s.db.QueryRowContext(ctx, `
+        SELECT e.blob, t.peer_id
+        FROM envelopes e
+        JOIN threads t ON t.id = e.thread_id
+        WHERE e.envelope_id = ?
+          AND e.from_node = (SELECT sign_pub FROM identity WHERE id = 1)
+    `, id[:])
+	var blob []byte
+	var peerBytes []byte
+	if err := row.Scan(&blob, &peerBytes); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return envelope.Envelope{}, identity.NodeID{}, false, nil
+		}
+		return envelope.Envelope{}, identity.NodeID{}, false, err
+	}
+	env, err = envelope.Unmarshal(blob)
+	if err != nil {
+		return envelope.Envelope{}, identity.NodeID{}, false, fmt.Errorf("decode stored envelope: %w", err)
+	}
+	copy(peer[:], peerBytes)
+	return env, peer, true, nil
+}
+
+func (s *sqliteStore) ListEnvelopeRecords(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]EnvelopeRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT blob, status, sent_at_ms, delivered_at_ms
+        FROM envelopes
+        WHERE thread_id = ? AND created_ms > ?
+        ORDER BY created_ms ASC
+    `, thread[:], sinceMs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []envelope.Envelope
+	var out []EnvelopeRecord
 	for rows.Next() {
 		var blob []byte
-		if err := rows.Scan(&blob); err != nil {
+		var status int
+		var sentAt sql.NullInt64
+		var deliveredAt sql.NullInt64
+		if err := rows.Scan(&blob, &status, &sentAt, &deliveredAt); err != nil {
 			return nil, err
 		}
 		env, err := envelope.Unmarshal(blob)
 		if err != nil {
 			return nil, fmt.Errorf("decode stored envelope: %w", err)
 		}
-		out = append(out, env)
+		rec := EnvelopeRecord{
+			Envelope: env,
+			Status:   DeliveryStatus(status),
+		}
+		if sentAt.Valid {
+			rec.SentAtMs = sentAt.Int64
+		}
+		if deliveredAt.Valid {
+			rec.DeliveredAtMs = deliveredAt.Int64
+		}
+		out = append(out, rec)
 	}
 	return out, rows.Err()
 }
@@ -449,6 +575,37 @@ func scanPeer(r scanner) (pairing.Peer, error) {
 	p.Trust = pairing.Trust(trust)
 	p.HumanReachable = reachable != 0
 	return p, nil
+}
+
+func applyEnvelopeStatusMigration(db *sql.DB) error {
+	for _, stmt := range envelopeStatusMigrationStatements {
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnNameError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func isDuplicateColumnNameError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
+}
+
+func (s *sqliteStore) ensureOutboundEnvelopeExists(ctx context.Context, id envelope.ULID) error {
+	row := s.db.QueryRowContext(ctx, `
+        SELECT 1
+        FROM envelopes
+        WHERE envelope_id = ?
+          AND from_node = (SELECT sign_pub FROM identity WHERE id = 1)
+        LIMIT 1
+    `, id[:])
+	var exists int
+	if err := row.Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func boolToInt(b bool) int {
