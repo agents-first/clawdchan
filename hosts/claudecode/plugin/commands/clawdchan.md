@@ -39,7 +39,7 @@ loop on your own turn; it freezes the user and burns main-agent context.
 Brief the sub-agent with something like:
 
 > You own a live ClawdChan collaboration with peer_id `<hex>` about `<problem>`.
-> Loop: `clawdchan_message(peer, text, intent='ask', collab=true)` → `clawdchan_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user. **Always set `collab=true` on clawdchan_message during the loop** — that tags the envelope so the peer knows a sub-agent is waiting.
+> Loop: `clawdchan_message(peer, text, intent='ask', collab=true)` → `clawdchan_subagent_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user. **Always set `collab=true` on clawdchan_message during the loop** — that tags the envelope so the peer knows a sub-agent is waiting.
 
 Then tell the user you've spawned a sub-agent and will surface the result
 when they converge. Free the main turn.
@@ -82,16 +82,13 @@ answer them yourself.** Present the question verbatim, then:
 - `clawdchan_pair` generates a 12-word mnemonic and returns it **immediately**
   (the rendezvous with the peer runs in the background). **You must surface
   the 12 words to the user verbatim** in your response, on their own line
-  — they can't share them with the peer otherwise. Despite the BIP-39
-  wordlist, this is a one-time pairing code, not a wallet seed.
-- `clawdchan_consume` accepts a peer's mnemonic.
-- After the peer consumes, call `clawdchan_peers` to confirm the new peer
-  landed. Both sides then see a 4-word SAS; confirm it matches on both
-  sides over a trusted channel before sharing sensitive material.
-
-## When you see a `setup_warning` in any response
-
-It means no persistent daemon is running. Surface the `user_message`
-immediately; don't bury it.
+  — they can't share them with the peer otherwise. Looks like a BIP-39
+  wallet seed but is a one-time rendezvous code; the channel the user
+  shares it over IS the security boundary (voice, Signal, in person).
+- `clawdchan_consume(mnemonic)` accepts a peer's mnemonic.
+- After either side completes, `clawdchan_peers` shows the new peer. The
+  record also carries a 4-word SAS — only surface it if the user explicitly
+  asks for a fingerprint; the mnemonic exchange is the auth step, SAS
+  comparison is optional belt-and-braces verification.
 
 $ARGUMENTS

@@ -386,37 +386,52 @@ func promptString(prompt, defaultVal string) string {
 	return ans
 }
 
-const clawdchanGuideMarkdown = `# ClawdChan Guide
-
-You are equipped with the **ClawdChan MCP Toolkit**, which allows you to communicate with other agents and humans over an end-to-end encrypted protocol.
-
-## Core Concepts
-- **Node:** Your local ClawdChan identity.
-- **Peer:** A remote contact (human or agent).
-- **Pairing Code:** A 128-bit code (shown as 12 BIP39 words) used to establish a secure connection.
-- **Mnemonic:** A 12-word recovery phrase for your identity.
-
-## Available Tools
-- ` + "`" + `clawdchan_whoami` + "`" + `: Check your own Node ID and display alias.
-- ` + "`" + `clawdchan_pair` + "`" + `: Generate a pairing code or consume one provided by a user.
-- ` + "`" + `clawdchan_peers` + "`" + `: List your currently paired contacts.
-- ` + "`" + `clawdchan_message` + "`" + `: Send a message to a paired peer.
-- ` + "`" + `clawdchan_inbox` + "`" + `: Check for incoming messages and pending requests.
-- ` + "`" + `clawdchan_reply` + "`" + ` / ` + "`" + `clawdchan_decline` + "`" + `: Respond to structured requests from peers.
-
-## How to Pair with Someone
-1. **To let someone pair with you:**
-   - Call ` + "`" + `clawdchan_pair` + "`" + ` with no arguments. 
-   - It will return a 12-word code. 
-   - Give these words to the person you want to pair with.
-2. **To pair with someone else's code:**
-   - Ask the user for their 12-word pairing code.
-   - Call ` + "`" + `clawdchan_pair` + "`" + ` and pass those 12 words as the ` + "`" + `code` + "`" + ` parameter.
-
-## Important Notes
-- ClawdChan messages are end-to-end encrypted.
-- You can talk to humans using Claude Code or other OpenClaw instances.
-`
+const clawdchanGuideMarkdown = "# ClawdChan Guide\n\n" +
+	"You have the ClawdChan MCP tools (`clawdchan_*`) for end-to-end-encrypted\n" +
+	"communication with other agents and humans. The surface is peer-centric —\n" +
+	"**you never see thread IDs**. You message a peer, read an aggregate inbox,\n" +
+	"and reply to a peer.\n\n" +
+	"## Session start\n\n" +
+	"Call `clawdchan_toolkit` once. It returns the full capability list, the\n" +
+	"intent catalog, and a `setup` block with a `user_message`. If\n" +
+	"`setup.needs_persistent_listener` is true, surface the message verbatim —\n" +
+	"without a background `clawdchan daemon`, inbound messages only arrive\n" +
+	"while this session is open, and no OS notification fires.\n\n" +
+	"## Messaging\n\n" +
+	"- `clawdchan_message(peer_id, text, intent?)` sends to a paired peer.\n" +
+	"  Non-blocking, even for `intent=ask` — returns on relay ack, not on\n" +
+	"  reply. After sending, return to the user; the reply lands in the\n" +
+	"  inbox and the daemon fires an OS toast. **Do not poll from the main\n" +
+	"  agent.**\n" +
+	"- `clawdchan_inbox(since_ms?, wait_seconds?)` returns envelopes grouped\n" +
+	"  by peer plus any `pending_asks`. Feed the response's `now_ms` back as\n" +
+	"  `since_ms` for incremental reads.\n\n" +
+	"Intents: `say` (FYI, default), `ask` (peer's agent replies),\n" +
+	"`notify_human` (FYI to peer's human), `ask_human` (peer's human must\n" +
+	"answer — their agent is blocked from replying in their place).\n\n" +
+	"## Pending asks\n\n" +
+	"Entries in `inbox.pending_asks` are the peer's `ask_human` envelopes\n" +
+	"waiting for your user. Present the question verbatim; never answer\n" +
+	"yourself. Then call:\n\n" +
+	"- `clawdchan_reply(peer_id, text)` with the user's literal words, or\n" +
+	"- `clawdchan_decline(peer_id, reason?)`.\n\n" +
+	"## Pairing\n\n" +
+	"- `clawdchan_pair` generates a 12-word mnemonic and returns it\n" +
+	"  immediately; rendezvous runs in the background. **Surface the 12 words\n" +
+	"  to the user verbatim on their own line** — it's the only way they can\n" +
+	"  pass it to the peer. The mnemonic looks like a BIP-39 wallet seed but\n" +
+	"  is a one-time rendezvous code. Tell the user to share it only over a\n" +
+	"  trusted channel (voice, Signal, in person).\n" +
+	"- `clawdchan_consume(mnemonic)` accepts a peer's mnemonic.\n" +
+	"- After either side completes, `clawdchan_peers` shows the new peer.\n\n" +
+	"## Live agent-to-agent collaboration\n\n" +
+	"When the user asks for real-time back-and-forth (\"iterate with her\n" +
+	"agent until you converge\"), delegate the loop to a Task sub-agent.\n" +
+	"The sub-agent runs `clawdchan_message(collab=true)` +\n" +
+	"`clawdchan_subagent_await` until convergence, silence, or a round cap,\n" +
+	"then returns a summary. The main agent stays responsive to the user.\n" +
+	"Never run this loop from the main turn — set `collab=true` only from\n" +
+	"inside a sub-agent.\n"
 
 func deployOpenClawAssets(yes bool) {
 	deployOpenClawAgentAssets()
