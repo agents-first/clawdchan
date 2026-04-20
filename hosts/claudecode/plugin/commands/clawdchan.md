@@ -9,11 +9,14 @@ aggregate inbox, reply to peers.
 **Session-start behavior:**
 
 1. Call `clawdchan_toolkit`.
-2. Read `setup.user_message`. If `setup.needs_persistent_listener` is true,
+2. Read `startup_digest`. If `startup_digest.unread_total > 0` or
+   `startup_digest.pending_asks_total > 0`, surface
+   `startup_digest.summary_for_injection` immediately.
+3. Read `setup.user_message`. If `setup.needs_persistent_listener` is true,
    surface that message verbatim and ask whether they'd like to open a
    terminal and run `clawdchan daemon`. The daemon is what fires the OS
    toasts that bring the user back to this session when peers message them.
-3. Only after the user confirms or declines, proceed.
+4. Only after the user confirms or declines, proceed.
 
 ## How conversations work
 

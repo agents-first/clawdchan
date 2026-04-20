@@ -56,7 +56,7 @@ Claude never sees thread IDs.
 
 | Tool | Purpose | Args |
 |---|---|---|
-| `clawdchan_toolkit` | Capability list + setup status. Call once at session start. | – |
+| `clawdchan_toolkit` | Capability list + setup status + startup unread digest. Call once at session start. | – |
 | `clawdchan_whoami` | This node's id and alias. | – |
 | `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
 | `clawdchan_pair` | Generate a 12-word mnemonic; rendezvous completes in the background. | `timeout_seconds?` |
@@ -206,9 +206,12 @@ Two processes can hold the relay link. Only one does at a time per node:
   from the shared store; it writes outbound to the outbox for the daemon to
   drain.
 
-`clawdchan_toolkit`'s `setup` block reports current state and includes a
-`user_message` field — if no daemon is present, Claude surfaces that message
-so the user knows to start one.
+`clawdchan_toolkit` returns two session-start blocks:
+
+- `startup_digest` — unread/pending totals plus a ready-to-speak summary
+  (for example, "You have 3 unread messages.").
+- `setup` — listener state with a `user_message` field; if no daemon is
+  present, Claude surfaces that message so the user knows to start one.
 
 ## Pending-asks pattern
 

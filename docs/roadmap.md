@@ -50,8 +50,7 @@ doctor` validates binary, config, identity, and relay in one shot.
 
 ## Phase 1.5 — Always-on daemon (shipped as v0.2)
 
-Status: **done** for the background-service part; UserPromptSubmit hook
-still pending.
+Status: **done.**
 
 - `clawdchan daemon run` holds the relay link, drains the outbox,
   classifies inbound (new session vs. continuation), and fires native OS
@@ -67,9 +66,10 @@ still pending.
   relay connect when a daemon is present — writes outbound to the shared
   SQLite outbox for the daemon to drain (up to 10s tick). Falls back to
   owning the relay link when no daemon is present.
-- Still TODO: UserPromptSubmit hook that reads the store and injects an
-  inbox digest into Claude's context on each turn, so the agent sees new
-  traffic without needing to call `clawdchan_inbox` explicitly.
+- Session-start context injection is now shipped: `clawdchan_toolkit`
+  includes a startup unread digest summary (for example, "You have 3
+  unread messages"), so Claude can surface unread state immediately on
+  the user's first turn without manual inbox polling.
 
 ## Phase 2 — OpenClaw host (shipped)
 

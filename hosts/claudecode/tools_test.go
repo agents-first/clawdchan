@@ -203,6 +203,69 @@ func TestParseMessageIntent(t *testing.T) {
 	}
 }
 
+func TestUnreadStatsForThread(t *testing.T) {
+	var me, peer identity.NodeID
+	me[0] = 0xAA
+	peer[0] = 0xBB
+
+	mkRecord := func(id byte, from identity.NodeID, role envelope.Role, intent envelope.Intent, ts int64) store.EnvelopeRecord {
+		return store.EnvelopeRecord{
+			Envelope: envelope.Envelope{
+				EnvelopeID:  envelope.ULID{id},
+				From:        envelope.Principal{NodeID: from, Role: role, Alias: "x"},
+				Intent:      intent,
+				CreatedAtMs: ts,
+				Content:     envelope.Content{Kind: envelope.ContentText, Text: "msg"},
+			},
+			Status: store.StatusDelivered,
+		}
+	}
+
+	t.Run("counts inbound newer than latest local outbound", func(t *testing.T) {
+		records := []store.EnvelopeRecord{
+			mkRecord(1, peer, envelope.RoleAgent, envelope.IntentSay, 100),
+			mkRecord(2, me, envelope.RoleAgent, envelope.IntentSay, 150),
+			mkRecord(3, peer, envelope.RoleAgent, envelope.IntentSay, 200),
+		}
+		unread, pending, last := unreadStatsForThread(records, me)
+		if unread != 1 || pending != 0 || last != 200 {
+			t.Fatalf("unread=%d pending=%d last=%d", unread, pending, last)
+		}
+	})
+
+	t.Run("pending ask_human remains unread and outbound ack does not clear unread", func(t *testing.T) {
+		records := []store.EnvelopeRecord{
+			mkRecord(4, peer, envelope.RoleAgent, envelope.IntentAskHuman, 100),
+			mkRecord(5, me, envelope.RoleAgent, envelope.IntentAck, 200),
+		}
+		unread, pending, _ := unreadStatsForThread(records, me)
+		if unread != 1 || pending != 1 {
+			t.Fatalf("want unread=1 pending=1, got unread=%d pending=%d", unread, pending)
+		}
+	})
+}
+
+func TestStartupDigestSummary(t *testing.T) {
+	cases := []struct {
+		name    string
+		unread  int
+		pending int
+		want    string
+	}{
+		{name: "empty", unread: 0, pending: 0, want: "You have no unread messages."},
+		{name: "unread only", unread: 3, pending: 0, want: "You have 3 unread messages."},
+		{name: "with pending", unread: 3, pending: 1, want: "You have 3 unread messages. 1 pending human ask is waiting on your answer."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := startupDigestSummary(tc.unread, tc.pending)
+			if got != tc.want {
+				t.Fatalf("summary=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInbox_OutboundEnvelopesCarryStatus(t *testing.T) {
 	ctx := context.Background()
 	n, peer, tid := setupInboxTestNode(t)
