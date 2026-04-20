@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"context"
+	"crypto/rand"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -9,8 +10,12 @@ import (
 	"time"
 
 	"github.com/vMaroon/ClawdChan/core/envelope"
+	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/vMaroon/ClawdChan/core/session"
+	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/core/surface"
+	"github.com/vMaroon/ClawdChan/core/transport"
 	"github.com/vMaroon/ClawdChan/internal/relayserver"
 )
 
@@ -35,6 +40,18 @@ func (c *captureHuman) Ask(context.Context, envelope.ThreadID, envelope.Envelope
 func (c *captureHuman) Reachability() surface.Reachability                     { return surface.ReachableSync }
 func (c *captureHuman) PresentThread(context.Context, envelope.ThreadID) error { return nil }
 
+type captureAgent struct {
+	mu       sync.Mutex
+	messages []envelope.Envelope
+}
+
+func (c *captureAgent) OnMessage(_ context.Context, env envelope.Envelope) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = append(c.messages, env)
+	return nil
+}
+
 func spinRelay(t *testing.T) string {
 	t.Helper()
 	srv := httptest.NewServer(relayserver.New(relayserver.Config{PairRendezvousTTL: 5 * time.Second}).Handler())
@@ -44,17 +61,141 @@ func spinRelay(t *testing.T) string {
 
 func mkNode(t *testing.T, relay, alias string, h surface.HumanSurface) *node.Node {
 	t.Helper()
+	return mkNodeWithSurfaces(t, relay, alias, h, nil)
+}
+
+func mkNodeWithSurfaces(t *testing.T, relay, alias string, h surface.HumanSurface, a surface.AgentSurface) *node.Node {
+	t.Helper()
 	n, err := node.New(node.Config{
 		DataDir:  t.TempDir(),
 		RelayURL: relay,
 		Alias:    alias,
 		Human:    h,
+		Agent:    a,
 	})
 	if err != nil {
 		t.Fatalf("new %s: %v", alias, err)
 	}
 	t.Cleanup(func() { _ = n.Close() })
 	return n
+}
+
+func pairNodes(t *testing.T, ctx context.Context, initiator, responder *node.Node) {
+	t.Helper()
+	code, pairCh, err := initiator.Pair(ctx)
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	peer, err := responder.Consume(ctx, code.Mnemonic())
+	if err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if peer.NodeID != initiator.Identity() {
+		t.Fatalf("wrong peer id: got %x want %x", peer.NodeID, initiator.Identity())
+	}
+	res := <-pairCh
+	if res.Err != nil {
+		t.Fatalf("pair result: %v", res.Err)
+	}
+	if res.Peer.NodeID != responder.Identity() {
+		t.Fatalf("wrong pair result id: got %x want %x", res.Peer.NodeID, responder.Identity())
+	}
+}
+
+func waitForStatus(t *testing.T, n *node.Node, thread envelope.ThreadID, envID envelope.ULID, want store.DeliveryStatus, timeout time.Duration) store.EnvelopeRecord {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		recs, err := n.ListEnvelopeRecords(context.Background(), thread, 0)
+		if err == nil {
+			for _, rec := range recs {
+				if rec.Envelope.EnvelopeID == envID && rec.Status == want {
+					return rec
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("status %v not reached for envelope %x", want, envID)
+	return store.EnvelopeRecord{}
+}
+
+func getRecordByID(t *testing.T, n *node.Node, thread envelope.ThreadID, envID envelope.ULID) store.EnvelopeRecord {
+	t.Helper()
+	recs, err := n.ListEnvelopeRecords(context.Background(), thread, 0)
+	if err != nil {
+		t.Fatalf("list envelope records: %v", err)
+	}
+	for _, rec := range recs {
+		if rec.Envelope.EnvelopeID == envID {
+			return rec
+		}
+	}
+	t.Fatalf("missing envelope record %x", envID)
+	return store.EnvelopeRecord{}
+}
+
+func randomULID(t *testing.T) envelope.ULID {
+	t.Helper()
+	var id envelope.ULID
+	if _, err := rand.Read(id[:]); err != nil {
+		t.Fatalf("random ULID: %v", err)
+	}
+	return id
+}
+
+func sendForgedAck(t *testing.T, relay string, from *node.Node, to identity.NodeID, thread envelope.ThreadID, parent envelope.ULID) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	senderID, err := from.Store().LoadIdentity(ctx)
+	if err != nil {
+		t.Fatalf("load sender identity: %v", err)
+	}
+	peer, err := from.GetPeer(ctx, to)
+	if err != nil {
+		t.Fatalf("load sender peer: %v", err)
+	}
+	sess, err := session.New(senderID, peer.KexPub)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	ack := envelope.Envelope{
+		Version:    envelope.Version,
+		EnvelopeID: randomULID(t),
+		ThreadID:   thread,
+		ParentID:   parent,
+		From: envelope.Principal{
+			NodeID: from.Identity(),
+			Role:   envelope.RoleAgent,
+			Alias:  from.Alias(),
+		},
+		Intent:      envelope.IntentAck,
+		CreatedAtMs: time.Now().UnixMilli(),
+		Content: envelope.Content{
+			Kind: envelope.ContentText,
+		},
+	}
+	if err := envelope.Sign(&ack, senderID); err != nil {
+		t.Fatalf("sign ack: %v", err)
+	}
+	blob, err := envelope.Marshal(ack)
+	if err != nil {
+		t.Fatalf("marshal ack: %v", err)
+	}
+	frame, err := sess.Seal(blob)
+	if err != nil {
+		t.Fatalf("seal ack frame: %v", err)
+	}
+	link, err := transport.NewWS(relay).Connect(ctx, senderID)
+	if err != nil {
+		t.Fatalf("connect forged sender: %v", err)
+	}
+	defer link.Close()
+	if err := link.Send(ctx, to, frame); err != nil {
+		t.Fatalf("send forged ack: %v", err)
+	}
 }
 
 func TestPairSendReceive(t *testing.T) {
@@ -317,5 +458,197 @@ pendingDetected:
 	}
 	if bob.HasPendingAsk(thread) {
 		t.Fatal("expected local ask_human not to count as pending inbound ask")
+	}
+}
+
+func TestAckRoundtrip(t *testing.T) {
+	relay := spinRelay(t)
+	alice := mkNode(t, relay, "alice", nil)
+	bob := mkNode(t, relay, "bob", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	if err := bob.Start(ctx); err != nil {
+		t.Fatalf("bob start: %v", err)
+	}
+	pairNodes(t, ctx, alice, bob)
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "ack-roundtrip")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+	if err := alice.Send(ctx, thread, envelope.IntentSay, envelope.Content{Kind: envelope.ContentText, Text: "ack me"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	aliceRecs, err := alice.ListEnvelopeRecords(ctx, thread, 0)
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+	if len(aliceRecs) != 1 {
+		t.Fatalf("expected one outbound record, got %d", len(aliceRecs))
+	}
+	envID := aliceRecs[0].Envelope.EnvelopeID
+
+	delivered := waitForStatus(t, alice, thread, envID, store.StatusDelivered, 4*time.Second)
+	if delivered.SentAtMs == 0 || delivered.DeliveredAtMs == 0 {
+		t.Fatalf("expected sent/delivered timestamps, got sent=%d delivered=%d", delivered.SentAtMs, delivered.DeliveredAtMs)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		bobRecs, err := bob.ListEnvelopeRecords(ctx, thread, 0)
+		if err == nil && len(bobRecs) >= 1 {
+			if len(bobRecs) != 1 {
+				t.Fatalf("expected one inbound record on bob, got %d", len(bobRecs))
+			}
+			if bobRecs[0].Envelope.Intent == envelope.IntentAck {
+				t.Fatal("ack should not be stored as a thread envelope")
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("bob never received inbound envelope")
+}
+
+func TestAckDoesNotRoute(t *testing.T) {
+	relay := spinRelay(t)
+	aliceHuman := &captureHuman{}
+	aliceAgent := &captureAgent{}
+	alice := mkNodeWithSurfaces(t, relay, "alice", aliceHuman, aliceAgent)
+	bob := mkNode(t, relay, "bob", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	if err := bob.Start(ctx); err != nil {
+		t.Fatalf("bob start: %v", err)
+	}
+	pairNodes(t, ctx, alice, bob)
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "ack-not-route")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+	if err := alice.Send(ctx, thread, envelope.IntentSay, envelope.Content{Kind: envelope.ContentText, Text: "route?"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	recs, err := alice.ListEnvelopeRecords(ctx, thread, 0)
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected one outbound record, got %d", len(recs))
+	}
+	waitForStatus(t, alice, thread, recs[0].Envelope.EnvelopeID, store.StatusDelivered, 4*time.Second)
+
+	aliceHuman.mu.Lock()
+	notified := len(aliceHuman.notified)
+	aliceHuman.mu.Unlock()
+	if notified != 0 {
+		t.Fatalf("ack should not notify human, got %d notifications", notified)
+	}
+	aliceAgent.mu.Lock()
+	msgs := len(aliceAgent.messages)
+	aliceAgent.mu.Unlock()
+	if msgs != 0 {
+		t.Fatalf("ack should not route to agent, got %d messages", msgs)
+	}
+}
+
+func TestAckRejectedFromWrongPeer(t *testing.T) {
+	relay := spinRelay(t)
+	alice := mkNode(t, relay, "alice", nil)
+	bob := mkNode(t, relay, "bob", nil)
+	charlie := mkNode(t, relay, "charlie", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	pairNodes(t, ctx, alice, bob)
+	pairNodes(t, ctx, alice, charlie)
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "ack-wrong-peer")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+	if err := alice.Send(ctx, thread, envelope.IntentSay, envelope.Content{Kind: envelope.ContentText, Text: "bob-only"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	recs, err := alice.ListEnvelopeRecords(ctx, thread, 0)
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected one outbound record, got %d", len(recs))
+	}
+	envID := recs[0].Envelope.EnvelopeID
+	waitForStatus(t, alice, thread, envID, store.StatusSent, 2*time.Second)
+
+	sendForgedAck(t, relay, charlie, alice.Identity(), thread, envID)
+
+	time.Sleep(300 * time.Millisecond)
+	rec := getRecordByID(t, alice, thread, envID)
+	if rec.Status != store.StatusSent {
+		t.Fatalf("status changed after spoofed ack: got %v want %v", rec.Status, store.StatusSent)
+	}
+	if rec.DeliveredAtMs != 0 {
+		t.Fatalf("expected no delivered timestamp, got %d", rec.DeliveredAtMs)
+	}
+}
+
+func TestAckRejectedForUnknownEnvelope(t *testing.T) {
+	relay := spinRelay(t)
+	alice := mkNode(t, relay, "alice", nil)
+	bob := mkNode(t, relay, "bob", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	if err := alice.Start(ctx); err != nil {
+		t.Fatalf("alice start: %v", err)
+	}
+	pairNodes(t, ctx, alice, bob)
+
+	thread, err := alice.OpenThread(ctx, bob.Identity(), "ack-unknown")
+	if err != nil {
+		t.Fatalf("open thread: %v", err)
+	}
+	if err := alice.Send(ctx, thread, envelope.IntentSay, envelope.Content{Kind: envelope.ContentText, Text: "known message"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	recs, err := alice.ListEnvelopeRecords(ctx, thread, 0)
+	if err != nil {
+		t.Fatalf("list records: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected one outbound record, got %d", len(recs))
+	}
+	envID := recs[0].Envelope.EnvelopeID
+	waitForStatus(t, alice, thread, envID, store.StatusSent, 2*time.Second)
+
+	sendForgedAck(t, relay, bob, alice.Identity(), thread, randomULID(t))
+
+	time.Sleep(300 * time.Millisecond)
+	rec := getRecordByID(t, alice, thread, envID)
+	if rec.Status != store.StatusSent {
+		t.Fatalf("status changed after unknown-envelope ack: got %v want %v", rec.Status, store.StatusSent)
+	}
+	if rec.DeliveredAtMs != 0 {
+		t.Fatalf("expected no delivered timestamp, got %d", rec.DeliveredAtMs)
 	}
 }

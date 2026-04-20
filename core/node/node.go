@@ -323,6 +323,11 @@ func (n *Node) ListEnvelopes(ctx context.Context, thread envelope.ThreadID, sinc
 	return n.store.ListEnvelopes(ctx, thread, sinceMs)
 }
 
+// ListEnvelopeRecords returns envelopes and their delivery metadata on thread.
+func (n *Node) ListEnvelopeRecords(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]store.EnvelopeRecord, error) {
+	return n.store.ListEnvelopeRecords(ctx, thread, sinceMs)
+}
+
 // Send emits a new envelope on thread with the given intent and content.
 func (n *Node) Send(ctx context.Context, thread envelope.ThreadID, intent envelope.Intent, content envelope.Content) error {
 	return n.sendAs(ctx, thread, envelope.RoleAgent, intent, content)
@@ -423,6 +428,11 @@ func (n *Node) deliver(ctx context.Context, peer pairing.Peer, env envelope.Enve
 	}
 	if err := link.Send(ctx, peer.NodeID, frame); err != nil {
 		return false, err
+	}
+	if env.Intent != envelope.IntentAck {
+		if err := n.store.MarkEnvelopeSent(ctx, env.EnvelopeID, time.Now().UnixMilli()); err != nil {
+			return true, err
+		}
 	}
 	return true, nil
 }
@@ -539,6 +549,10 @@ func (n *Node) handleInbound(frame transport.Frame) {
 	if err := envelope.Verify(env); err != nil {
 		return
 	}
+	if env.Intent == envelope.IntentAck {
+		n.handleAck(ctx, peer, env)
+		return
+	}
 	// Drop envelopes for threads we don't know about, unless the peer itself
 	// is opening a new thread (v0 simplification: creator opens).
 	thread, err := n.store.GetThread(ctx, env.ThreadID)
@@ -566,6 +580,44 @@ func (n *Node) handleInbound(frame transport.Frame) {
 	}
 	n.publish(env)
 	n.route(ctx, env)
+	n.emitAck(ctx, peer, env)
+}
+
+func (n *Node) handleAck(ctx context.Context, peer pairing.Peer, ack envelope.Envelope) {
+	_, expectedPeer, ok, err := n.store.GetOutboundEnvelope(ctx, ack.ParentID)
+	if err != nil || !ok {
+		return
+	}
+	if expectedPeer != peer.NodeID {
+		return
+	}
+	_ = n.store.MarkEnvelopeDelivered(ctx, ack.ParentID, ack.CreatedAtMs)
+}
+
+func (n *Node) emitAck(ctx context.Context, peer pairing.Peer, inbound envelope.Envelope) {
+	ack := envelope.Envelope{
+		Version:    envelope.Version,
+		EnvelopeID: newULID(),
+		ThreadID:   inbound.ThreadID,
+		ParentID:   inbound.EnvelopeID,
+		From: envelope.Principal{
+			NodeID: n.identity.SigningPublic,
+			Role:   envelope.RoleAgent,
+			Alias:  n.cfg.Alias,
+		},
+		Intent:      envelope.IntentAck,
+		CreatedAtMs: time.Now().UnixMilli(),
+		Content: envelope.Content{
+			Kind: envelope.ContentText,
+		},
+	}
+	if err := envelope.Sign(&ack, n.identity); err != nil {
+		return
+	}
+	delivered, _ := n.deliver(ctx, peer, ack)
+	if !delivered {
+		_ = n.store.EnqueueOutbox(ctx, peer.NodeID, ack)
+	}
 }
 
 func (n *Node) route(ctx context.Context, env envelope.Envelope) {
