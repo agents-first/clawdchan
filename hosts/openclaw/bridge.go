@@ -655,10 +655,10 @@ func (b *Bridge) handshake(ctx context.Context, conn *websocket.Conn) error {
 	pub := b.deviceKey.Public().(ed25519.PublicKey)
 	pubHash := sha256.Sum256(pub)
 	actualDeviceID := hex.EncodeToString(pubHash[:])
-	
+
 	signedAt := time.Now().UnixMilli()
 	payloadStr := fmt.Sprintf("v2|%s|cli|node|operator|operator.read,operator.write|%d|%s|%s", actualDeviceID, signedAt, b.token, challengePayload.Nonce)
-	
+
 	sig := ed25519.Sign(b.deviceKey, []byte(payloadStr))
 	pubB64 := base64.RawURLEncoding.EncodeToString(pub)
 	sigB64 := base64.RawURLEncoding.EncodeToString(sig)

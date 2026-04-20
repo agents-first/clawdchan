@@ -486,7 +486,7 @@ func registerClawdChanMCP() error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Create JSON command object for 'openclaw mcp set'
 	cmdObj := map[string]string{
 		"command": mcpBin,
