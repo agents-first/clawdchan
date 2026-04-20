@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -41,6 +42,7 @@ import (
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
 	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/hosts/openclaw"
 	"github.com/vMaroon/ClawdChan/internal/listenerreg"
 )
@@ -461,11 +463,21 @@ func cmdThreads(_ []string) error {
 		fmt.Println("no threads")
 		return nil
 	}
+	me := n.Identity()
 	for _, t := range threads {
-		fmt.Printf("%s  peer=%s  topic=%q\n",
+		glyph := ""
+		records, err := n.Store().ListEnvelopeRecords(context.Background(), t.ID, 0)
+		if err != nil {
+			return err
+		}
+		if status, ok := latestOutboundStatus(records, me); ok {
+			glyph = "  " + statusGlyph(status)
+		}
+		fmt.Printf("%s  peer=%s  topic=%q%s\n",
 			hex.EncodeToString(t.ID[:]),
 			hex.EncodeToString(t.PeerID[:])[:16],
-			t.Topic)
+			t.Topic,
+			glyph)
 	}
 	return nil
 }
@@ -567,6 +579,8 @@ func cmdListen(args []string) error {
 	nid := n.Identity()
 	fmt.Printf("clawdchan listening (relay=%s, node=%s)\n", c.RelayURL, hex.EncodeToString(nid[:]))
 	fmt.Println("legend: '->' = sent by this node, '<-' = received. role is 'agent' or 'human'. thread is full 32-hex id.")
+	fmt.Printf("status glyphs (outbound only): %s=queued %s=sent %s=delivered\n",
+		statusGlyph(store.StatusQueued), statusGlyph(store.StatusSent), statusGlyph(store.StatusDelivered))
 
 	unregister, regErr := listenerreg.Register(
 		c.DataDir, listenerreg.KindCLI,
@@ -593,25 +607,28 @@ func followAll(ctx context.Context, n *node.Node, tail int) {
 	threads, err := n.ListThreads(ctx)
 	if err == nil {
 		for _, th := range threads {
-			envs, err := n.ListEnvelopes(ctx, th.ID, 0)
+			records, err := n.Store().ListEnvelopeRecords(ctx, th.ID, 0)
 			if err != nil {
 				continue
 			}
 			start := 0
 			if tail == 0 {
-				start = len(envs)
-			} else if tail > 0 && len(envs) > tail {
-				start = len(envs) - tail
+				start = len(records)
+			} else if tail > 0 && len(records) > tail {
+				start = len(records) - tail
 			}
-			for i := start; i < len(envs); i++ {
-				e := envs[i]
-				seen[e.EnvelopeID] = true
-				printEnvelope(e, n.Identity())
+			for i := start; i < len(records); i++ {
+				rec := records[i]
+				seen[rec.Envelope.EnvelopeID] = true
+				if rec.Envelope.Intent == envelope.IntentAck {
+					continue
+				}
+				printEnvelopeRecord(rec, n.Identity())
 			}
 			// Mark envelopes we skipped during tail trimming as seen so they
 			// don't re-appear in the live phase.
 			for i := 0; i < start; i++ {
-				seen[envs[i].EnvelopeID] = true
+				seen[records[i].Envelope.EnvelopeID] = true
 			}
 		}
 	}
@@ -630,16 +647,19 @@ func followAll(ctx context.Context, n *node.Node, tail int) {
 			continue
 		}
 		for _, th := range threads {
-			envs, err := n.ListEnvelopes(ctx, th.ID, 0)
+			records, err := n.Store().ListEnvelopeRecords(ctx, th.ID, 0)
 			if err != nil {
 				continue
 			}
-			for _, env := range envs {
-				if seen[env.EnvelopeID] {
+			for _, rec := range records {
+				if seen[rec.Envelope.EnvelopeID] {
 					continue
 				}
-				seen[env.EnvelopeID] = true
-				printEnvelope(env, n.Identity())
+				seen[rec.Envelope.EnvelopeID] = true
+				if rec.Envelope.Intent == envelope.IntentAck {
+					continue
+				}
+				printEnvelopeRecord(rec, n.Identity())
 			}
 		}
 	}
@@ -889,20 +909,75 @@ func parseThreadID(s string) (envelope.ThreadID, error) {
 	return id, nil
 }
 
+func latestOutboundStatus(records []store.EnvelopeRecord, me identity.NodeID) (store.DeliveryStatus, bool) {
+	for i := len(records) - 1; i >= 0; i-- {
+		rec := records[i]
+		if rec.Envelope.Intent == envelope.IntentAck {
+			continue
+		}
+		if rec.Envelope.From.NodeID == me {
+			return rec.Status, true
+		}
+	}
+	return store.StatusQueued, false
+}
+
+func useLegacyASCIIGlyphs() bool {
+	return runtime.GOOS == "windows" && os.Getenv("WT_SESSION") == "" && os.Getenv("TERM_PROGRAM") == ""
+}
+
+func statusGlyph(status store.DeliveryStatus) string {
+	if useLegacyASCIIGlyphs() {
+		switch status {
+		case store.StatusQueued:
+			return "."
+		case store.StatusSent:
+			return ">"
+		case store.StatusDelivered:
+			return "v"
+		default:
+			return "?"
+		}
+	}
+	switch status {
+	case store.StatusQueued:
+		return "·"
+	case store.StatusSent:
+		return "→"
+	case store.StatusDelivered:
+		return "✓"
+	default:
+		return "?"
+	}
+}
+
 func printEnvelope(env envelope.Envelope, me identity.NodeID) {
+	printEnvelopeWithStatus(env, store.StatusQueued, false, me)
+}
+
+func printEnvelopeRecord(rec store.EnvelopeRecord, me identity.NodeID) {
+	printEnvelopeWithStatus(rec.Envelope, rec.Status, true, me)
+}
+
+func printEnvelopeWithStatus(env envelope.Envelope, status store.DeliveryStatus, withStatus bool, me identity.NodeID) {
 	dir := "<-"
-	if env.From.NodeID == me {
+	outbound := env.From.NodeID == me
+	if outbound {
 		dir = "->"
 	}
 	role := "agent"
 	if env.From.Role == envelope.RoleHuman {
 		role = "human"
 	}
+	content := renderContent(env.Intent, env.Content)
+	if withStatus && outbound {
+		content = fmt.Sprintf("%s %s", content, statusGlyph(status))
+	}
 	fmt.Printf("[%s] %s %s/%s  thread=%s  %s\n",
 		time.UnixMilli(env.CreatedAtMs).Format(time.RFC3339),
 		dir, env.From.Alias, role,
 		hex.EncodeToString(env.ThreadID[:]),
-		renderContent(env.Intent, env.Content))
+		content)
 }
 
 func renderContent(intent envelope.Intent, c envelope.Content) string {
