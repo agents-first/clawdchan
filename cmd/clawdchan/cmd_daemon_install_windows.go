@@ -35,3 +35,26 @@ func unregisterWindowsAppID() error {
 	key := `HKCU\Software\Classes\AppUserModelId\` + notify.WindowsAppID
 	return exec.Command("reg", "delete", key, "/f").Run()
 }
+
+// registerURLScheme bounds the clawdchan:// protocol to the executable.
+func registerURLScheme(exePath string) error {
+	key := `HKCU\Software\Classes\clawdchan`
+	if out, err := exec.Command("reg", "add", key, "/ve", "/d", "URL:ClawdChan Protocol", "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg add scheme name: %w: %s", err, string(out))
+	}
+	if out, err := exec.Command("reg", "add", key, "/v", "URL Protocol", "/t", "REG_SZ", "/d", "", "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg add URL Protocol: %w: %s", err, string(out))
+	}
+
+	cmdKey := key + `\shell\open\command`
+	target := fmt.Sprintf(`"%s" consume --web "%%1"`, exePath)
+	if out, err := exec.Command("reg", "add", cmdKey, "/ve", "/d", target, "/f").CombinedOutput(); err != nil {
+		return fmt.Errorf("reg add cmd: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+func unregisterURLScheme() error {
+	key := `HKCU\Software\Classes\clawdchan`
+	return exec.Command("reg", "delete", key, "/f").Run()
+}

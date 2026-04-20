@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -228,7 +229,7 @@ func (n *Node) Pair(ctx context.Context) (pairing.Code, <-chan PairResult, error
 	card := pairing.MyCard(n.identity, n.cfg.Alias, n.currentHuman().Reachability() != surface.Unreachable)
 	out := make(chan PairResult, 1)
 	go func() {
-		peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, true)
+		peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, true, nil)
 		if err != nil {
 			out <- PairResult{Err: err}
 			return
@@ -242,14 +243,26 @@ func (n *Node) Pair(ctx context.Context) (pairing.Code, <-chan PairResult, error
 	return code, out, nil
 }
 
-// Consume pairs with a peer using a mnemonic generated on the other side.
-func (n *Node) Consume(ctx context.Context, mnemonic string) (pairing.Peer, error) {
-	code, err := pairing.ParseCode(mnemonic)
+// Consume pairs with a peer using a mnemonic or URI generated on the other side.
+func (n *Node) Consume(ctx context.Context, input string) (pairing.Peer, error) {
+	return n.ConsumeInteractive(ctx, input, nil)
+}
+
+// ConsumeInteractive is like Consume but takes an optional callback to confirm pairing 
+// after identifying the peer but before sending our public identity.
+func (n *Node) ConsumeInteractive(ctx context.Context, input string, confirm func(ctx context.Context, peerCard pairing.Card) (bool, error)) (pairing.Peer, error) {
+	var code pairing.Code
+	var err error
+	if strings.HasPrefix(input, "clawdchan://") {
+		code, err = pairing.ParseURI(input)
+	} else {
+		code, err = pairing.ParseCode(input)
+	}
 	if err != nil {
 		return pairing.Peer{}, err
 	}
 	card := pairing.MyCard(n.identity, n.cfg.Alias, n.currentHuman().Reachability() != surface.Unreachable)
-	peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, false)
+	peer, err := pairing.Rendezvous(ctx, n.cfg.RelayURL, code, card, false, confirm)
 	if err != nil {
 		return pairing.Peer{}, err
 	}

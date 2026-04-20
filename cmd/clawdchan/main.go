@@ -5,7 +5,7 @@
 //	clawdchan init      [-data DIR] [-relay URL] [-alias NAME] [-write-mcp DIR]
 //	clawdchan whoami
 //	clawdchan pair      [-alias NAME]                 print code; wait for peer
-//	clawdchan consume   <mnemonic...>                  consume a code
+//	clawdchan consume   [-web] <mnemonic...|url>       consume a code
 //	clawdchan peers
 //	clawdchan threads
 //	clawdchan open      <peer-hex> [-topic T]          open a new thread
@@ -367,6 +367,10 @@ func cmdPair(args []string) error {
 	fmt.Println()
 	fmt.Printf("    clawdchan consume %s\n", code.Mnemonic())
 	fmt.Println()
+	fmt.Println("Or send them this link:")
+	fmt.Println()
+	fmt.Printf("    %s\n", code.URI())
+	fmt.Println()
 	fmt.Println("Waiting for the peer…")
 
 	res := <-ch
@@ -382,10 +386,18 @@ func cmdPair(args []string) error {
 // --- consume ----------------------------------------------------------------
 
 func cmdConsume(args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: clawdchan consume <12 words>")
+	fs := flag.NewFlagSet("consume", flag.ExitOnError)
+	web := fs.Bool("web", false, "open browser confirmation UI")
+	fs.Parse(args)
+
+	if len(fs.Args()) < 1 {
+		return errors.New("usage: clawdchan consume [-web] <12 words|clawdchan://...>")
 	}
-	mnemonic := strings.Join(args, " ")
+	input := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if input == "" {
+		return errors.New("usage: clawdchan consume [-web] <12 words|clawdchan://...>")
+	}
+	useWeb := *web || strings.HasPrefix(strings.ToLower(input), "clawdchan://")
 
 	c, err := loadConfig()
 	if err != nil {
@@ -400,7 +412,11 @@ func cmdConsume(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	peer, err := n.Consume(ctx, mnemonic)
+	if useWeb {
+		return RunWebConfirmation(ctx, n, input)
+	}
+
+	peer, err := n.Consume(ctx, input)
 	if err != nil {
 		return err
 	}

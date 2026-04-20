@@ -197,3 +197,78 @@ func TestParseMessageIntent(t *testing.T) {
 		}
 	}
 }
+
+func TestUnreadStatsForThread(t *testing.T) {
+	var me, peer identity.NodeID
+	me[0] = 0xAA
+	peer[0] = 0xBB
+
+	mk := func(id byte, from identity.NodeID, role envelope.Role, intent envelope.Intent, ts int64) envelope.Envelope {
+		return envelope.Envelope{
+			EnvelopeID:  envelope.ULID{id},
+			From:        envelope.Principal{NodeID: from, Role: role, Alias: "x"},
+			Intent:      intent,
+			CreatedAtMs: ts,
+			Content:     envelope.Content{Kind: envelope.ContentText, Text: "msg"},
+		}
+	}
+
+	t.Run("counts inbound newer than latest outbound", func(t *testing.T) {
+		envs := []envelope.Envelope{
+			mk(1, peer, envelope.RoleAgent, envelope.IntentSay, 100),
+			mk(2, me, envelope.RoleAgent, envelope.IntentSay, 150),
+			mk(3, peer, envelope.RoleAgent, envelope.IntentSay, 200),
+		}
+		unread, pending, last := unreadStatsForThread(envs, me)
+		if unread != 1 || pending != 0 || last != 200 {
+			t.Fatalf("unread=%d pending=%d last=%d", unread, pending, last)
+		}
+	})
+
+	t.Run("pending ask_human stays unread even if older than outbound", func(t *testing.T) {
+		envs := []envelope.Envelope{
+			mk(1, peer, envelope.RoleAgent, envelope.IntentAskHuman, 100),
+			mk(2, me, envelope.RoleAgent, envelope.IntentSay, 200),
+		}
+		unread, pending, _ := unreadStatsForThread(envs, me)
+		if unread != 1 || pending != 1 {
+			t.Fatalf("want unread=1 pending=1, got unread=%d pending=%d", unread, pending)
+		}
+	})
+}
+
+func TestStartupDigestSummary(t *testing.T) {
+	cases := []struct {
+		name        string
+		unread      int
+		pendingAsks int
+		want        string
+	}{
+		{
+			name:        "empty",
+			unread:      0,
+			pendingAsks: 0,
+			want:        "You have no unread messages.",
+		},
+		{
+			name:        "unread only",
+			unread:      3,
+			pendingAsks: 0,
+			want:        "You have 3 unread messages.",
+		},
+		{
+			name:        "with pending asks",
+			unread:      3,
+			pendingAsks: 1,
+			want:        "You have 3 unread messages. 1 pending human ask is waiting on your answer.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := startupDigestSummary(tc.unread, tc.pendingAsks)
+			if got != tc.want {
+				t.Fatalf("summary = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

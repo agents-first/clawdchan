@@ -57,11 +57,11 @@ func TestRendezvousExchange(t *testing.T) {
 	bCh := make(chan result, 1)
 
 	go func() {
-		p, err := pairing.Rendezvous(ctx, baseURL, code, aCard, true)
+		p, err := pairing.Rendezvous(ctx, baseURL, code, aCard, true, nil)
 		aCh <- result{p, err}
 	}()
 	go func() {
-		p, err := pairing.Rendezvous(ctx, baseURL, code, bCard, false)
+		p, err := pairing.Rendezvous(ctx, baseURL, code, bCard, false, nil)
 		bCh <- result{p, err}
 	}()
 

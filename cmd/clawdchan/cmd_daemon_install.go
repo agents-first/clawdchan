@@ -151,6 +151,12 @@ func daemonInstall(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := registerURLScheme(bin); err != nil {
+		fmt.Printf("note: URL scheme registration failed: %v\n", err)
+	} else {
+		fmt.Println("registered clawdchan:// URL scheme handler")
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
 		return installLaunchd(bin, *force)
@@ -348,6 +354,10 @@ func verifyTestNotification() {
 // --- uninstall -------------------------------------------------------------
 
 func daemonUninstall(_ []string) error {
+	if err := unregisterURLScheme(); err != nil {
+		fmt.Printf("note: URL scheme unregister failed: %v\n", err)
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
 		home, _ := os.UserHomeDir()

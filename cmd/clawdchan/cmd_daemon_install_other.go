@@ -1,10 +1,9 @@
-//go:build !windows
+//go:build !windows && !linux && !darwin
 
 package main
 
-// registerWindowsAppID and unregisterWindowsAppID are Windows-only. The
-// runtime.GOOS branches in cmd_daemon_install.go never invoke them on
-// other platforms, but the symbols must resolve at build time.
-
 func registerWindowsAppID() error   { return nil }
 func unregisterWindowsAppID() error { return nil }
+
+func registerURLScheme(exePath string) error { return nil }
+func unregisterURLScheme() error             { return nil }

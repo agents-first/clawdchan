@@ -63,6 +63,27 @@ func (c Code) Mnemonic() string {
 	return m
 }
 
+// URI returns the clawdchan:// representation of the code.
+func (c Code) URI() string {
+	m := c.Mnemonic()
+	slug := strings.ReplaceAll(m, " ", "-")
+	return fmt.Sprintf("clawdchan://pair?m=%s", slug)
+}
+
+// ParseURI extracts a pairing code from a clawdchan:// URI.
+func ParseURI(uriStr string) (Code, error) {
+	u, err := url.Parse(uriStr)
+	if err != nil || u.Scheme != "clawdchan" || u.Host != "pair" {
+		return Code{}, errors.New("pairing: invalid clawdchan uri")
+	}
+	m := u.Query().Get("m")
+	if m == "" {
+		return Code{}, errors.New("pairing: missing mnemonic in uri")
+	}
+	mnemonic := strings.ReplaceAll(m, "-", " ")
+	return ParseCode(mnemonic)
+}
+
 // ParseCode decodes a 12-word BIP39 mnemonic back into a Code.
 func ParseCode(mnemonic string) (Code, error) {
 	mnemonic = strings.Join(strings.Fields(strings.ToLower(mnemonic)), " ")
@@ -122,7 +143,8 @@ func MyCard(self *identity.Identity, alias string, reachable bool) Card {
 // Rendezvous performs the paired exchange. Both sides derive the same AEAD
 // key from code and meet at the relay's /pair endpoint under
 // SHA-256(code) as the rendezvous hash. The initiator sends first.
-func Rendezvous(ctx context.Context, relayURL string, code Code, myCard Card, isInitiator bool) (Peer, error) {
+// If not initiator and confirm is non-nil, it pauses before sending its card to ask for approval.
+func Rendezvous(ctx context.Context, relayURL string, code Code, myCard Card, isInitiator bool, confirm func(ctx context.Context, peerCard Card) (bool, error)) (Peer, error) {
 	aead, err := aeadForCode(code)
 	if err != nil {
 		return Peer{}, err
@@ -179,14 +201,26 @@ func Rendezvous(ctx context.Context, relayURL string, code Code, myCard Card, is
 		if err != nil {
 			return Peer{}, fmt.Errorf("decrypt peer card: %w", err)
 		}
-		if err := conn.WriteMessage(websocket.BinaryMessage, sealed); err != nil {
-			return Peer{}, fmt.Errorf("send card: %w", err)
-		}
 	}
 
 	var peerCard Card
 	if err := cbor.Unmarshal(peerBlob, &peerCard); err != nil {
 		return Peer{}, fmt.Errorf("parse peer card: %w", err)
+	}
+
+	if !isInitiator {
+		if confirm != nil {
+			ok, err := confirm(ctx, peerCard)
+			if err != nil {
+				return Peer{}, fmt.Errorf("confirm error: %w", err)
+			}
+			if !ok {
+				return Peer{}, errors.New("pairing: declined by user")
+			}
+		}
+		if err := conn.WriteMessage(websocket.BinaryMessage, sealed); err != nil {
+			return Peer{}, fmt.Errorf("send card: %w", err)
+		}
 	}
 
 	sas := computeSAS(code, myCard.KexPub, peerCard.KexPub)
