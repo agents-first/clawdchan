@@ -3,6 +3,9 @@
 BIN := ./bin
 CMDS := clawdchan clawdchan-relay clawdchan-mcp
 
+# Pinned so local and CI runs agree. Bump together.
+STATICCHECK_VERSION := 2026.1
+
 # Optional OpenClaw overrides for `make install-openclaw`:
 #   make install-openclaw OPENCLAW_URL=wss://gw.local OPENCLAW_TOKEN=xxx
 # Leave blank for the default interactive prompt (`make install`).
@@ -36,6 +39,7 @@ help:
 	@echo "Everyday:"
 	@echo "  build             Build all binaries into ./bin"
 	@echo "  test              Run the full test suite"
+	@echo "  lint              Run staticcheck over ./..."
 	@echo "  tidy              go mod tidy"
 	@echo ""
 	@echo "Install:"
@@ -57,6 +61,9 @@ FORCE:
 
 test:
 	go test ./... -timeout 120s
+
+lint:
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
 tidy:
 	go mod tidy

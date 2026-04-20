@@ -26,6 +26,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "2026.1"
+          install-go: false
+
       - name: gofmt
         run: |
           diff=$(gofmt -l .)
