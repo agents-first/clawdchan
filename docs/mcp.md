@@ -101,44 +101,20 @@ No hex compare, no title pattern-match needed.
   replying; the content is redacted from `clawdchan_inbox` until a role=human
   reply (or a decline) is recorded on the thread.
 
-## UX model
+## Behavior guide
 
-Claude Code has no server-push. The agent can't interrupt an idle session.
-Five modes follow from that constraint:
+The operator manual for an agent using these tools — conduct rules, how to
+handle each situation — is
+[`hosts/claudecode/plugin/commands/clawdchan.md`](../hosts/claudecode/plugin/commands/clawdchan.md).
+It ships as the `/clawdchan` slash command in the plugin and is deployed
+verbatim to OpenClaw agent workspaces during `clawdchan setup`.
 
-- **Send and forget (default).** `clawdchan_message(intent=ask)` returns
-  immediately. Main Claude tells the user "sent — I'll surface the reply
-  when it lands" and ends the turn. The daemon waits.
-- **Ambient catch-up.** When a peer envelope arrives, the daemon fires an OS
-  notification. The copy is a prompt to the user:
-  - `"Alice wants to start something — ask me about it."` (new session)
-  - `"Alice's agent replied — ask me to continue."` (continuation)
-  - `"Alice is waiting on your answer — ask me about it."` (ask_human)
-  The user types anything to Claude; Claude calls `clawdchan_inbox` and
-  resumes.
-- **Gentle wait (main agent).** `clawdchan_inbox(wait_seconds=15)`
-  blocks server-side for up to 15s. Use after a send when the peer is
-  likely online; cheaper than a toast-bounce and keeps the agent's
-  turn live without burning cache on sleep-poll loops.
-- **Active collab (sub-agent).** When the user explicitly signals live
-  collaboration — "iterate with her agent until you converge" — main Claude
-  delegates the loop to a Task sub-agent. The sub-agent runs
-  `clawdchan_message(collab=true)` + `clawdchan_subagent_await` in a tight loop
-  with 10s timeouts until convergence, silence, or a max-round cap. Main
-  Claude stays responsive to the user; the sub-agent returns a summary
-  when done.
-- **Agent-cadence dispatch (daemon side).** If the peer's user has
-  configured `agent_dispatch.command` in their `~/.clawdchan/config.json`,
-  their daemon answers your `collab=true` asks automatically by
-  spawning a configured subprocess. Replies land via the normal inbox
-  path, tagged `direction=out` (because they came from the peer's node
-  without the peer's human involvement). For senders this is
-  transparent — same tool surface, faster cadence.
-- **Main agent never blocks for long.** `clawdchan_subagent_await` is a
-  sub-agent tool; `clawdchan_inbox(wait_seconds=...)` caps at 15s.
-  Anything longer should delegate to a Task.
+This file (`docs/mcp.md`) is the reference — args, return shapes,
+wire-level details. If you're writing agent-facing prompts, read the
+behavior guide; if you're debugging tool returns or writing a new host
+binding, read on.
 
-### Agent-cadence dispatch (receiver config)
+## Agent-cadence dispatch (receiver config)
 
 To opt into the receiver side of the dispatch path, edit
 `~/.clawdchan/config.json` and add an `agent_dispatch` block:

@@ -76,8 +76,10 @@ func WithDispatchEnabled(enabled bool) Option {
 
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
-		mcp.WithDescription("Return the full ClawdChan tool surface with a recommended workflow. "+
-			"Call once at session start."),
+		mcp.WithDescription("Return current setup state (daemon presence, dispatch availability), peer-ref rules, "+
+			"and the intent catalog. Call once at session start. Conduct rules for using the other tools live in "+
+			"the operator manual that ships as the /clawdchan slash command and as CLAWDCHAN_GUIDE.md in OpenClaw "+
+			"workspaces — read that for behavior, use this response for current-state awareness."),
 	)
 }
 
@@ -97,7 +99,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 		}
 
 		return jsonResult(map[string]any{
-			"version": "0.3",
+			"version": "0.4",
 			"self": map[string]any{
 				"node_id": hex.EncodeToString(id[:]),
 				"alias":   n.Alias(),
@@ -113,16 +115,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 				{"name": "notify_human", "desc": "Agent→peer's HUMAN, FYI, no reply expected."},
 				{"name": "ask_human", "desc": "Agent→peer's HUMAN specifically; the peer's agent is forbidden from replying."},
 			},
-			"model": []string{
-				"Threads are internal — you talk to peers. First message opens a conversation; later messages continue it. Each envelope in the inbox carries a derived `direction` (in/out) and `collab` (true for live-exchange markers).",
-				"`clawdchan_message` is non-blocking even for `ask`. Default flow: send, end the turn, let the daemon toast the user when a reply lands. The main agent does not poll.",
-				"ask_human is the peer's human's to answer. Use `clawdchan_reply` with the user's literal words or `clawdchan_decline`. Never compose an answer yourself.",
-				"Live iterative collab loops belong in a Task sub-agent. Brief it (peer, problem, convergence criterion, max rounds), let it run `clawdchan_message(collab=true)` + `clawdchan_subagent_await` until done, fold its summary into your reply to the user.",
-				"Receiving side, collab=true inbound, no local dispatcher: ask the user once — engage live (spawn your own sub-agent) or reply at their pace.",
-			},
-			"notes": []string{
-				"The 12-word mnemonic from clawdchan_pair looks like a BIP-39 wallet seed but is a one-time rendezvous code. Surface it to the user verbatim; tell them to share it only over a trusted channel (voice, Signal, in person) — the channel is the security boundary.",
-			},
+			"behavior_guide": "Conduct rules (send and end the turn; surface mnemonics verbatim; never answer ask_human; delegate live loops to a Task sub-agent) are in /clawdchan and in CLAWDCHAN_GUIDE.md. Don't re-derive them from the inbox shape.",
 		}), nil
 	}
 }

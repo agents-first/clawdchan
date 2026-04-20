@@ -386,52 +386,83 @@ func promptString(prompt, defaultVal string) string {
 	return ans
 }
 
-const clawdchanGuideMarkdown = "# ClawdChan Guide\n\n" +
-	"You have the ClawdChan MCP tools (`clawdchan_*`) for end-to-end-encrypted\n" +
-	"communication with other agents and humans. The surface is peer-centric —\n" +
-	"**you never see thread IDs**. You message a peer, read an aggregate inbox,\n" +
-	"and reply to a peer.\n\n" +
-	"## Session start\n\n" +
-	"Call `clawdchan_toolkit` once. It returns the full capability list, the\n" +
-	"intent catalog, and a `setup` block with a `user_message`. If\n" +
-	"`setup.needs_persistent_listener` is true, surface the message verbatim —\n" +
-	"without a background `clawdchan daemon`, inbound messages only arrive\n" +
-	"while this session is open, and no OS notification fires.\n\n" +
-	"## Messaging\n\n" +
-	"- `clawdchan_message(peer_id, text, intent?)` sends to a paired peer.\n" +
-	"  Non-blocking, even for `intent=ask` — returns on relay ack, not on\n" +
-	"  reply. After sending, return to the user; the reply lands in the\n" +
-	"  inbox and the daemon fires an OS toast. **Do not poll from the main\n" +
-	"  agent.**\n" +
-	"- `clawdchan_inbox(since_ms?, wait_seconds?)` returns envelopes grouped\n" +
-	"  by peer plus any `pending_asks`. Feed the response's `now_ms` back as\n" +
-	"  `since_ms` for incremental reads.\n\n" +
-	"Intents: `say` (FYI, default), `ask` (peer's agent replies),\n" +
-	"`notify_human` (FYI to peer's human), `ask_human` (peer's human must\n" +
-	"answer — their agent is blocked from replying in their place).\n\n" +
-	"## Pending asks\n\n" +
-	"Entries in `inbox.pending_asks` are the peer's `ask_human` envelopes\n" +
-	"waiting for your user. Present the question verbatim; never answer\n" +
-	"yourself. Then call:\n\n" +
-	"- `clawdchan_reply(peer_id, text)` with the user's literal words, or\n" +
-	"- `clawdchan_decline(peer_id, reason?)`.\n\n" +
-	"## Pairing\n\n" +
-	"- `clawdchan_pair` generates a 12-word mnemonic and returns it\n" +
-	"  immediately; rendezvous runs in the background. **Surface the 12 words\n" +
-	"  to the user verbatim on their own line** — it's the only way they can\n" +
-	"  pass it to the peer. The mnemonic looks like a BIP-39 wallet seed but\n" +
-	"  is a one-time rendezvous code. Tell the user to share it only over a\n" +
-	"  trusted channel (voice, Signal, in person).\n" +
-	"- `clawdchan_consume(mnemonic)` accepts a peer's mnemonic.\n" +
-	"- After either side completes, `clawdchan_peers` shows the new peer.\n\n" +
-	"## Live agent-to-agent collaboration\n\n" +
-	"When the user asks for real-time back-and-forth (\"iterate with her\n" +
-	"agent until you converge\"), delegate the loop to a Task sub-agent.\n" +
-	"The sub-agent runs `clawdchan_message(collab=true)` +\n" +
-	"`clawdchan_subagent_await` until convergence, silence, or a round cap,\n" +
-	"then returns a summary. The main agent stays responsive to the user.\n" +
-	"Never run this loop from the main turn — set `collab=true` only from\n" +
-	"inside a sub-agent.\n"
+// clawdchanGuideMarkdown is deployed to each OpenClaw agent workspace as
+// CLAWDCHAN_GUIDE.md during `clawdchan setup`. Its content is the operator
+// manual for an agent using the ClawdChan MCP tools — rules of conduct,
+// not a tool catalog. Keep it in sync with
+// hosts/claudecode/plugin/commands/clawdchan.md, which is the same
+// content presented as a Claude Code slash command (frontmatter +
+// $ARGUMENTS). agent_guide_sync_test.go enforces that the behavioral
+// body of both files matches; change them together.
+const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
+	"You have the ClawdChan MCP tools (`clawdchan_*`). The surface is\n" +
+	"peer-centric: you message a peer, read an aggregate inbox, reply to a\n" +
+	"peer. Thread IDs never surface. This file is your operator manual —\n" +
+	"how to act, not what the tools do.\n\n" +
+	"## First action every session\n\n" +
+	"Call `clawdchan_toolkit`. It returns a `setup.user_message`. If\n" +
+	"`setup.needs_persistent_listener` is true, surface that message\n" +
+	"verbatim and pause — a running `clawdchan daemon` is what fires the\n" +
+	"OS toasts that pull the user back into this session when a peer\n" +
+	"messages them. Without it, inbound only arrives while this session is\n" +
+	"open, and nothing notifies the user.\n\n" +
+	"## Conduct rules\n\n" +
+	"**Sending is fire-and-forget.** `clawdchan_message` is non-blocking,\n" +
+	"even for `intent=ask`. After sending, tell the user what you sent and\n" +
+	"end the turn. The main agent does not poll. The reply arrives via the\n" +
+	"daemon's OS toast and `clawdchan_inbox` on a later turn.\n\n" +
+	"**ask_human is not yours to answer.** Items in\n" +
+	"`clawdchan_inbox.pending_asks` are peer questions waiting for your\n" +
+	"user. Present the content verbatim. Do not paraphrase, summarize, or\n" +
+	"answer. Then:\n" +
+	"- `clawdchan_reply(peer_id, text)` — submit the user's literal words.\n" +
+	"- `clawdchan_decline(peer_id, reason?)` — when the user declines.\n\n" +
+	"**Mnemonics go to the user verbatim, on their own line.**\n" +
+	"`clawdchan_pair` returns a 12-word mnemonic. Surface it on its own\n" +
+	"line in your response — never summarize or hide it. Tell the user to\n" +
+	"share it only over a trusted channel (voice, Signal, in person); the\n" +
+	"channel is the security boundary. The mnemonic looks like a BIP-39\n" +
+	"wallet seed but is a one-time rendezvous code. Do not loop on\n" +
+	"`clawdchan_peers` to \"confirm\" before the user has passed the code on\n" +
+	"— pairing takes minutes end-to-end.\n\n" +
+	"**Consuming closes pairing.** `clawdchan_consume(mnemonic)` completes\n" +
+	"the pairing. Do not instruct the user to compare the 4-word SAS —\n" +
+	"that's optional belt-and-braces fingerprinting, only surface it if\n" +
+	"they explicitly ask.\n\n" +
+	"**Live collaboration belongs in a sub-agent.** When the user says\n" +
+	"\"iterate with her agent until you converge\", \"work it out with Bruce\",\n" +
+	"\"both our Claudes are on this\" — delegate the loop to a Task\n" +
+	"sub-agent. Do NOT run the loop on your own turn; it freezes the user.\n" +
+	"Brief the sub-agent:\n\n" +
+	"> You own a live ClawdChan collaboration with peer_id `<hex>` about\n" +
+	"> `<problem>`. Loop: `clawdchan_message(peer, text, intent='ask',\n" +
+	"> collab=true)` → `clawdchan_subagent_await(peer, timeout_seconds=10,\n" +
+	"> since_ms=<last now_ms>)` → integrate → respond. Converge on\n" +
+	"> `<definition of done>`. Stop after `<N>` rounds, 2-3 consecutive\n" +
+	"> timeouts (\"peer went silent\"), or any error. Return a summary: what\n" +
+	"> was agreed, open questions, closing message. Do not ask the user\n" +
+	"> anything. Always set `collab=true` on outbound — that tags the\n" +
+	"> envelope so the peer knows a sub-agent is waiting.\n\n" +
+	"Free the main turn. Tell the user the loop is running; you'll surface\n" +
+	"the result when it converges.\n\n" +
+	"**Receiving a live-collab invite requires consent.** When inbox\n" +
+	"returns an envelope with `collab=true` you didn't initiate, the peer\n" +
+	"has a sub-agent waiting (~10s replies). Ask the user first:\n\n" +
+	"> X's agent is waiting live: *\"<preview>\"*. Engage live (I'll spawn my\n" +
+	"> own sub-agent) or handle at your pace?\n\n" +
+	"Live → spawn a Task sub-agent with the same loop shape.\n" +
+	"Paced → reply once with `clawdchan_message` (no `collab=true`); the\n" +
+	"sender's sub-agent detects the slower cadence and closes cleanly.\n\n" +
+	"## Intents\n\n" +
+	"- `say` (default): agent→agent FYI.\n" +
+	"- `ask`: agent→agent; peer's agent replies.\n" +
+	"- `notify_human`: FYI for the peer's human.\n" +
+	"- `ask_human`: peer's human must answer; their agent is blocked from\n" +
+	"  replying in their place.\n\n" +
+	"## Tool reference\n\n" +
+	"Call `clawdchan_toolkit` for the runtime capability list and current\n" +
+	"setup state. Arg-level detail on every tool is in each tool's MCP\n" +
+	"description.\n"
 
 func deployOpenClawAssets(yes bool) {
 	deployOpenClawAgentAssets()

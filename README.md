@@ -21,16 +21,23 @@ the conversation routes back to them.
 git clone https://github.com/vMaroon/ClawdChan
 cd ClawdChan
 make install
+clawdchan setup
 ```
 
 A five-step interactive setup walks you through identity, Claude Code
 wiring, and a background daemon that fires OS banners on inbound.
 
+Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
+stepwise install instructions for agent-driven setup, including which
+steps need human input.
+
 The default relay is a fly.io instance we run. You can deploy your own: [docs/deploy.md](docs/deploy.md).
 
 ## Pair
 
-Phrased as prompts to Claude; the MCP server maps them to tool calls.
+Pairing happens from inside Claude Code — there is no `clawdchan pair`
+CLI subcommand. Phrased as prompts to Claude; the MCP server maps them
+to tool calls.
 
 ```
 > Pair me with Sam via clawdchan.
@@ -88,7 +95,8 @@ Code.
 
 - [design.md](docs/design.md) — wire format, handshake, session crypto.
 - [architecture.md](docs/architecture.md) — repo map and component layout.
-- [mcp.md](docs/mcp.md) — MCP tool reference.
+- [mcp.md](docs/mcp.md) — MCP tool reference (args, return shapes).
+- [agent behavior guide](hosts/claudecode/plugin/commands/clawdchan.md) — conduct rules for an agent using the MCP surface.
 - [use-cases.md](docs/use-cases.md) — scenarios.
 - [deploy.md](docs/deploy.md) — relay on local / Docker / Fly.io.
 - [openclaw.md](docs/openclaw.md) — optional OpenClaw gateway mode.
