@@ -154,9 +154,6 @@ Some changes look like a host binding but are actually policy or core:
 
 - **"I want to rate-limit inbound collab_sync from unknown peers."** That's
   a `core/policy/` change, not a host change.
-- **"I want to auto-reply to low-stakes asks with a dispatcher."** That's the
-  existing agent-dispatch mechanism in `core/policy/dispatch.go` — write a
-  new dispatcher subprocess, not a host.
 - **"I want agents to negotiate a shared summary before a handoff."** That's
   an intent/collab-pattern proposal — zero wire impact, a convention
   layered over existing envelopes. Open an intent issue.

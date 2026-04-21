@@ -29,16 +29,8 @@ import (
 // to" — and matches the UX the daemon enforces: toasts like "Alice's agent
 // replied — ask me about it" bring the user back to the Claude Code session,
 // where the agent resumes naturally from inbox state.
-//
-// opts tune what the toolkit tool reports back — notably whether the local
-// node has agent-dispatch configured, which the agent wants to know so it
-// can set expectations about cadence.
-func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
-	cfg := regOpts{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	s.AddTool(toolkitTool(), toolkitHandler(n, &cfg))
+func RegisterTools(s *server.MCPServer, n *node.Node) {
+	s.AddTool(toolkitTool(), toolkitHandler(n))
 	s.AddTool(peersTool(), peersHandler(n))
 	s.AddTool(pairTool(), pairHandler(n))
 	s.AddTool(consumeTool(), consumeHandler(n))
@@ -50,50 +42,21 @@ func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
 	s.AddTool(peerRenameTool(), peerRenameHandler(n))
 }
 
-// Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
-// it's a variadic slot now so callers don't break when we add more.
-type Option func(*regOpts)
-
-type regOpts struct {
-	dispatchEnabled bool
-}
-
-// WithDispatchEnabled tells the toolkit to report that the local daemon
-// has agent-dispatch configured. The MCP binary reads this from the same
-// config.json the daemon reads. When enabled, incoming collab=true asks
-// will be auto-answered by the configured subprocess — the agent can set
-// its expectations about conversation cadence accordingly, and knows
-// that some outbound envelopes it finds in its own inbox may have been
-// dispatcher-produced rather than sent by this session's agent.
-func WithDispatchEnabled(enabled bool) Option {
-	return func(o *regOpts) { o.dispatchEnabled = enabled }
-}
-
 // --- toolkit ----------------------------------------------------------------
 
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
-		mcp.WithDescription("Return current setup state (daemon presence, dispatch availability), peer-ref rules, "+
+		mcp.WithDescription("Return current setup state (daemon presence), peer-ref rules, "+
 			"and the intent catalog. Call once at session start. Conduct rules for using the other tools live in "+
 			"the operator manual that ships as the /clawdchan slash command and as CLAWDCHAN_GUIDE.md in OpenClaw "+
 			"workspaces — read that for behavior, use this response for current-state awareness."),
 	)
 }
 
-func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
+func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		id := n.Identity()
 		setup := buildSetupStatus(n)
-
-		// Dispatch awareness. When the local daemon has agent-dispatch
-		// configured, inbound collab=true asks are auto-answered by a
-		// subprocess rather than waiting for the human — and that fact
-		// shapes how the agent should describe cadence and attribute
-		// outbound envelopes it didn't itself send this session.
-		dispatch := map[string]any{"enabled": opts != nil && opts.dispatchEnabled}
-		if opts != nil && opts.dispatchEnabled {
-			dispatch["note"] = "Incoming collab=true asks are auto-answered at agent speed by a local subprocess. If you see direction=out collab=true envelopes in a thread that you don't remember sending this session, your dispatcher handled them while the user was away — describe them that way, not as something you said."
-		}
 
 		return jsonResult(map[string]any{
 			"version": "0.4",
@@ -102,8 +65,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 				"alias":   n.Alias(),
 				"relay":   n.RelayURL(),
 			},
-			"setup":    setup,
-			"dispatch": dispatch,
+			"setup": setup,
 			"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
 				"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 			"intents": []map[string]string{

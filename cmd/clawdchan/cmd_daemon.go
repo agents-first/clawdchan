@@ -21,7 +21,6 @@ import (
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/identity"
 	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/core/policy"
 	"github.com/vMaroon/ClawdChan/core/store"
 	"github.com/vMaroon/ClawdChan/core/surface"
 	"github.com/vMaroon/ClawdChan/hosts/openclaw"
@@ -90,21 +89,7 @@ func daemonRun(args []string) error {
 		}
 	}
 
-	dispatcher, dispatchCfg, dErr := buildDispatcher(c)
-	if dErr != nil {
-		return fmt.Errorf("dispatcher: %w", dErr)
-	}
-	if dispatcher != nil {
-		log.Printf("agent_dispatch: enabled (command=%s timeout=%ds max_rounds=%d)",
-			dispatchCfg.Command[0], dispatchCfg.TimeoutSeconds, dispatchCfg.MaxCollabRounds)
-	} else {
-		log.Printf("agent_dispatch: not configured — incoming collab-sync asks will toast the user instead of auto-answering")
-	}
-	d := &daemonSurface{
-		verbose:     *verbose,
-		dispatcher:  dispatcher,
-		dispatchCfg: dispatchCfg,
-	}
+	d := &daemonSurface{verbose: *verbose}
 	n, err := node.New(node.Config{
 		DataDir:  c.DataDir,
 		RelayURL: c.RelayURL,
@@ -146,7 +131,7 @@ func daemonRun(args []string) error {
 		}
 	}
 
-	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID, dispatcher != nil)
+	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID)
 	if err != nil {
 		return err
 	}
@@ -266,7 +251,7 @@ func discoverOpenClaw(ctx context.Context) (wsURL, token string, err error) {
 	return "", "", nil
 }
 
-func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string, dispatchEnabled bool) (*openClawRuntime, error) {
+func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string) (*openClawRuntime, error) {
 	if wsURL == "" {
 		return nil, nil
 	}
@@ -328,7 +313,7 @@ func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceI
 		cleanup.cancelSubs = append(cleanup.cancelSubs, subCancel)
 		go bridge.RunSubscriber(subCtx, sid, n, th.ID)
 	}
-	openclaw.RegisterTools(bridge, n, openclaw.WithDispatchEnabled(dispatchEnabled))
+	openclaw.RegisterTools(bridge, n)
 
 	hub := openclaw.NewHub(n, bridge, sm)
 	go func() {
@@ -345,61 +330,14 @@ func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceI
 
 // daemonSurface receives inbound envelopes and fires OS notifications.
 // Debounces per peer within debounceWindow so a rapid burst from one peer
-// yields one toast, not ten.
-//
-// When a dispatcher is configured and a peer sends an envelope marked
-// with the collab-sync title, daemonSurface takes an alternate path: it
-// feeds the ask to the configured subprocess and routes the subprocess's
-// answer back as a normal envelope. This is the agent-cadence collab
-// path — see core/policy/dispatch.go for the wire contract, and
-// daemon_dispatch.go for the orchestration. The notification-policy
-// gates that decide "should this inbound toast" live in daemon_notify.go.
+// yields one toast, not ten. Notification-policy gates that decide
+// "should this inbound toast" live in daemon_notify.go.
 type daemonSurface struct {
-	verbose     bool
-	node        *node.Node
-	dispatcher  policy.Dispatcher
-	dispatchCfg *dispatchConfig
+	verbose bool
+	node    *node.Node
 
 	mu   sync.Mutex
 	last map[identity.NodeID]time.Time
-
-	// inFlightMu/inFlight tracks per-peer active dispatches so we don't
-	// spawn two subprocesses for one peer's burst of collab asks. While a
-	// dispatch is running for a peer, additional asks from that peer
-	// fall through to the OS-toast path and will be picked up after the
-	// current dispatch finishes.
-	inFlightMu sync.Mutex
-	inFlight   map[identity.NodeID]bool
-}
-
-// buildDispatcher constructs a policy.Dispatcher from the config's
-// agent_dispatch block. Returns nil when dispatch is disabled or
-// unconfigured — the daemon treats that as "no dispatcher" and falls
-// through to the classic toast-and-wait path.
-//
-// When dispatch is configured, the first element of Command is resolved
-// via exec.LookPath. A missing or unexecutable binary returns an error
-// so the daemon refuses to start with a broken dispatcher — otherwise
-// every inbound collab-sync silently declines at runtime, which is the
-// worst of both worlds (the user thinks dispatch works; the sender's
-// sub-agent exits on the decline).
-func buildDispatcher(c config) (policy.Dispatcher, *dispatchConfig, error) {
-	if c.Dispatch == nil || !c.Dispatch.Enabled || len(c.Dispatch.Command) == 0 {
-		return nil, c.Dispatch, nil
-	}
-	resolved, err := exec.LookPath(c.Dispatch.Command[0])
-	if err != nil {
-		return nil, c.Dispatch, fmt.Errorf("agent_dispatch.command[0] %q: %w", c.Dispatch.Command[0], err)
-	}
-	command := append([]string(nil), c.Dispatch.Command...)
-	command[0] = resolved
-	timeout := time.Duration(c.Dispatch.TimeoutSeconds) * time.Second
-	d := &policy.SubprocessDispatcher{
-		Command:         command,
-		Timeout:         timeout,
-		MaxCollabRounds: c.Dispatch.MaxCollabRounds,
-	}
-	return d, c.Dispatch, nil
 }
 
 const debounceWindow = 30 * time.Second

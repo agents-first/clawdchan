@@ -16,28 +16,13 @@ import (
 )
 
 // dispatch is the single entry point for inbound envelopes. It decides
-// whether to (a) hand the envelope to the collab-dispatcher subprocess,
-// (b) stay silent because a session is already live, (c) drop the toast
-// for debounce, or (d) fire an OS notification. Everything the daemon
-// does in response to inbound traffic flows through here.
+// whether to (a) stay silent because a session is already live,
+// (b) drop the toast for debounce, or (c) fire an OS notification.
+// Everything the daemon does in response to inbound traffic flows
+// through here.
 func (d *daemonSurface) dispatch(tid envelope.ThreadID, env envelope.Envelope) {
 	if env.From.NodeID == d.node.Identity() {
 		return
-	}
-
-	// Agent-cadence collab path: if the envelope is a collab-sync ask
-	// from a peer AND we have a dispatcher configured AND no dispatch is
-	// already in flight for this peer, spawn the configured subprocess
-	// to answer at agent speed. Successful dispatch is silent (the
-	// sender's sub-agent sees the reply via clawdchan_await / inbox);
-	// a decline or error falls through to the OS-toast path so the
-	// human sees something happened.
-	if d.dispatcher != nil && d.dispatcher.Enabled() && isCollabSync(env.Content) &&
-		(env.Intent == envelope.IntentAsk || env.Intent == envelope.IntentSay) {
-		if d.claimDispatch(env.From.NodeID) {
-			go d.runCollabDispatch(tid, env)
-			return
-		}
 	}
 
 	// Active-session suppression: once a thread is already mid-session,

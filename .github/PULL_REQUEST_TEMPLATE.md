@@ -14,7 +14,6 @@
 - [ ] Touches `hosts/<name>/`
 - [ ] Touches `cmd/`
 - [ ] Touches the wire format or signing input (also update `docs/design.md`)
-- [ ] Touches the dispatcher contract (also update `core/policy/dispatch.go` doc and any tests)
 
 ## Invariants
 
