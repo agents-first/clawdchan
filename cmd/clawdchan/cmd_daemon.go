@@ -146,7 +146,7 @@ func daemonRun(args []string) error {
 		}
 	}
 
-	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID)
+	ocRuntime, err := enableOpenClawMode(ctx, n, *openClawURL, *openClawToken, *openClawDeviceID, dispatcher != nil)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func discoverOpenClaw(ctx context.Context) (wsURL, token string, err error) {
 	return "", "", nil
 }
 
-func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string) (*openClawRuntime, error) {
+func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceID string, dispatchEnabled bool) (*openClawRuntime, error) {
 	if wsURL == "" {
 		return nil, nil
 	}
@@ -328,6 +328,8 @@ func enableOpenClawMode(ctx context.Context, n *node.Node, wsURL, token, deviceI
 		cleanup.cancelSubs = append(cleanup.cancelSubs, subCancel)
 		go bridge.RunSubscriber(subCtx, sid, n, th.ID)
 	}
+	openclaw.RegisterTools(bridge, n, openclaw.WithDispatchEnabled(dispatchEnabled))
+
 	hub := openclaw.NewHub(n, bridge, sm)
 	go func() {
 		if err := hub.Start(ctx); err != nil {
