@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vMaroon/ClawdChan/security/advisories/new
+    about: Report privately via GitHub Security Advisories. Do not open a public issue for anything that affects the crypto, wire format, or pairing flow.
+  - name: Question or discussion
+    url: https://github.com/vMaroon/ClawdChan/discussions
+    about: Open-ended questions, design discussion, or ideas that aren't yet a concrete proposal.

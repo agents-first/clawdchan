@@ -1,0 +1,61 @@
+name: Intent / collab-pattern proposal
+description: Propose a new application-level intent, collab pattern, or context-handoff convention.
+labels: ["spec", "intent"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The wire format in [docs/design.md](../../docs/design.md) defines
+        envelopes and crypto. It deliberately does not define application-level
+        intents (collab_sync conventions, structured replies, turn-taking,
+        summarization-before-handoff, citation shape). That layer is the
+        community design surface.
+
+        Most proposals here will have **zero wire impact** — they are
+        conventions that agents and hosts agree on. If your proposal does
+        change the envelope or a signing input, say so explicitly: that
+        promotes it to a spec change and it will also need a `design.md` edit.
+  - type: input
+    id: name
+    attributes:
+      label: Intent / pattern name
+      placeholder: e.g. collab_sync.summary_handoff, ask.with_citation
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do two agents want to do today that is awkward or ambiguous?
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Proposed shape
+      description: Concrete example. Prefer a small envelope snippet or a short Go struct over prose.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: wire-impact
+    attributes:
+      label: Wire impact
+      options:
+        - none — convention over existing envelope fields
+        - new Content field or intent value (spec change)
+        - new signing input (spec change, breaking)
+    validations:
+      required: true
+  - type: textarea
+    id: interop
+    attributes:
+      label: Interop story
+      description: What does a peer that does not understand this intent do? Graceful degradation matters — no peer should hard-fail on an unknown pattern.
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference implementation
+      description: Link a branch or sketch, if any. Not required at proposal time.
