@@ -90,7 +90,16 @@ func daemonRun(args []string) error {
 		}
 	}
 
-	dispatcher, dispatchCfg := buildDispatcher(c)
+	dispatcher, dispatchCfg, dErr := buildDispatcher(c)
+	if dErr != nil {
+		return fmt.Errorf("dispatcher: %w", dErr)
+	}
+	if dispatcher != nil {
+		log.Printf("agent_dispatch: enabled (command=%s timeout=%ds max_rounds=%d)",
+			dispatchCfg.Command[0], dispatchCfg.TimeoutSeconds, dispatchCfg.MaxCollabRounds)
+	} else {
+		log.Printf("agent_dispatch: not configured — incoming collab-sync asks will toast the user instead of auto-answering")
+	}
 	d := &daemonSurface{
 		verbose:     *verbose,
 		dispatcher:  dispatcher,
@@ -365,17 +374,30 @@ type daemonSurface struct {
 // agent_dispatch block. Returns nil when dispatch is disabled or
 // unconfigured — the daemon treats that as "no dispatcher" and falls
 // through to the classic toast-and-wait path.
-func buildDispatcher(c config) (policy.Dispatcher, *dispatchConfig) {
+//
+// When dispatch is configured, the first element of Command is resolved
+// via exec.LookPath. A missing or unexecutable binary returns an error
+// so the daemon refuses to start with a broken dispatcher — otherwise
+// every inbound collab-sync silently declines at runtime, which is the
+// worst of both worlds (the user thinks dispatch works; the sender's
+// sub-agent exits on the decline).
+func buildDispatcher(c config) (policy.Dispatcher, *dispatchConfig, error) {
 	if c.Dispatch == nil || !c.Dispatch.Enabled || len(c.Dispatch.Command) == 0 {
-		return nil, c.Dispatch
+		return nil, c.Dispatch, nil
 	}
+	resolved, err := exec.LookPath(c.Dispatch.Command[0])
+	if err != nil {
+		return nil, c.Dispatch, fmt.Errorf("agent_dispatch.command[0] %q: %w", c.Dispatch.Command[0], err)
+	}
+	command := append([]string(nil), c.Dispatch.Command...)
+	command[0] = resolved
 	timeout := time.Duration(c.Dispatch.TimeoutSeconds) * time.Second
 	d := &policy.SubprocessDispatcher{
-		Command:         append([]string(nil), c.Dispatch.Command...),
+		Command:         command,
 		Timeout:         timeout,
 		MaxCollabRounds: c.Dispatch.MaxCollabRounds,
 	}
-	return d, c.Dispatch
+	return d, c.Dispatch, nil
 }
 
 const debounceWindow = 30 * time.Second
