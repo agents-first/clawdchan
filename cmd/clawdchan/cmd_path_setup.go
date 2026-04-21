@@ -79,6 +79,10 @@ func cmdPathSetup(args []string) error {
 	fmt.Println()
 
 	if !*yes {
+		if !stdinIsTTY() {
+			fmt.Println("(non-interactive session — not editing your shell profile. Re-run with -y, or add the line above yourself.)")
+			return nil
+		}
 		ok, err := promptYN(fmt.Sprintf("Append to %s? [Y/n]: ", profile), true)
 		if err != nil {
 			return err

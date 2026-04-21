@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/core/pairing"
 )
 
 func cmdWhoami(_ []string) error {

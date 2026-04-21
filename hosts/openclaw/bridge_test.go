@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/internal/relayserver"
 	"github.com/gorilla/websocket"
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/internal/relayserver"
 )
 
 type fakeGatewayClient struct {

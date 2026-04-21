@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
 )
 
 func firstNonEmpty(vals ...string) string {

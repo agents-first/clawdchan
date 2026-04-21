@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vMaroon/ClawdChan/core/store"
+	"github.com/agents-first/ClawdChan/core/store"
 )
 
 func TestHubContextEmptyPeersMentionsNoPairedPeers(t *testing.T) {

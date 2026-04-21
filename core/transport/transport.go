@@ -18,8 +18,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/relaywire"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/relaywire"
 )
 
 // Frame is one inbound message: an opaque payload addressed from a peer.

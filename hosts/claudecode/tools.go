@@ -11,11 +11,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/core/policy"
-	"github.com/vMaroon/ClawdChan/hosts"
-	"github.com/vMaroon/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/policy"
+	"github.com/agents-first/ClawdChan/hosts"
+	"github.com/agents-first/ClawdChan/internal/listenerreg"
 )
 
 // RegisterTools registers the ClawdChan MCP surface on s, bound to n.

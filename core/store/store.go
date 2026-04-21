@@ -11,9 +11,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/pairing"
 )
 
 // Store is the aggregate persistence interface. A single SQLite file backs all

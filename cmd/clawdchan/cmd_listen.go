@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/internal/listenerreg"
 )
 
 func cmdListen(args []string) error {

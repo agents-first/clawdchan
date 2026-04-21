@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/store"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/store"
 )
 
 func ForAgent(env envelope.Envelope, peer *store.Peer) string {

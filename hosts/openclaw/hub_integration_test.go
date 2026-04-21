@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/envelope"
 )
 
 func TestHubIntegrationOpenClawNativePairingRoundTrip(t *testing.T) {

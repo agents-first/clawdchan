@@ -25,10 +25,10 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/core/surface"
-	"github.com/vMaroon/ClawdChan/hosts/claudecode"
-	"github.com/vMaroon/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/hosts/claudecode"
+	"github.com/agents-first/ClawdChan/internal/listenerreg"
 )
 
 type config struct {

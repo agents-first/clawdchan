@@ -21,7 +21,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
 
-	"github.com/vMaroon/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/identity"
 )
 
 // Label is the HKDF info string for session key derivation. Changing it is a

@@ -4,9 +4,9 @@
 package policy
 
 import (
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/pairing"
 )
 
 // Decision is the policy output for an incoming envelope.

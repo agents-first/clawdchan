@@ -9,7 +9,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 
-	"github.com/vMaroon/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/identity"
 )
 
 const Version uint8 = 1

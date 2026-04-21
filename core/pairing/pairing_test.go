@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/pairing"
-	"github.com/vMaroon/ClawdChan/internal/relayserver"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/internal/relayserver"
 )
 
 func TestCodeMnemonicRoundTrip(t *testing.T) {
