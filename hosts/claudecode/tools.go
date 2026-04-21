@@ -39,7 +39,6 @@ func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
 		opt(&cfg)
 	}
 	s.AddTool(toolkitTool(), toolkitHandler(n, &cfg))
-	s.AddTool(whoamiTool(), whoamiHandler(n))
 	s.AddTool(peersTool(), peersHandler(n))
 	s.AddTool(pairTool(), pairHandler(n))
 	s.AddTool(consumeTool(), consumeHandler(n))
@@ -49,8 +48,6 @@ func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
 	s.AddTool(replyTool(), replyHandler(n))
 	s.AddTool(declineTool(), declineHandler(n))
 	s.AddTool(peerRenameTool(), peerRenameHandler(n))
-	s.AddTool(peerRevokeTool(), peerRevokeHandler(n))
-	s.AddTool(peerRemoveTool(), peerRemoveHandler(n))
 }
 
 // Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
@@ -190,24 +187,6 @@ func buildSetupStatus(n *node.Node) map[string]any {
 }
 
 var osGetpid = func() int { return os.Getpid() }
-
-// --- whoami -----------------------------------------------------------------
-
-func whoamiTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_whoami",
-		mcp.WithDescription("Return this node's alias and node id."),
-	)
-}
-
-func whoamiHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		id := n.Identity()
-		return jsonResult(map[string]any{
-			"node_id": hex.EncodeToString(id[:]),
-			"alias":   n.Alias(),
-		}), nil
-	}
-}
 
 // --- peers ------------------------------------------------------------------
 
@@ -881,7 +860,13 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 	}
 }
 
-// --- peer management (rename / revoke / remove) ---------------------------
+// --- peer management (rename) ---------------------------------------------
+//
+// Revoke and hard-delete are deliberately CLI-only (`clawdchan peer revoke`
+// / `clawdchan peer remove`). Exposing destructive verbs to the agent
+// invites mis-classification of "stop talking to Alice for now" as
+// revocation; the CLI fallback keeps the user in the loop for anything
+// irreversible.
 
 func peerRenameTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_peer_rename",
@@ -917,71 +902,6 @@ func peerRenameHandler(n *node.Node) server.ToolHandlerFunc {
 			"peer_id":  hex.EncodeToString(peerID[:]),
 			"previous": before.Alias,
 			"alias":    alias,
-		}), nil
-	}
-}
-
-func peerRevokeTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_peer_revoke",
-		mcp.WithDescription("Mark a peer's trust as revoked. Inbound envelopes from them will be dropped; outbound sends will error. The record and history stay — use clawdchan_peer_remove for a full delete. Only call with explicit user intent ('revoke Alice', 'stop trusting Bruce', 'cut off X')."),
-		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to revoke. Accepts hex, prefix, or alias.")),
-	)
-}
-
-func peerRevokeHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ref, err := req.RequireString("peer_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		peerID, err := resolvePeerRef(ctx, n, ref)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		p, _ := n.GetPeer(ctx, peerID)
-		if err := n.RevokePeer(ctx, peerID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return jsonResult(map[string]any{
-			"ok":      true,
-			"peer_id": hex.EncodeToString(peerID[:]),
-			"alias":   p.Alias,
-			"note":    "trust=revoked. Inbound dropped; history preserved. Use clawdchan_peer_remove for a hard delete.",
-		}), nil
-	}
-}
-
-func peerRemoveTool() mcp.Tool {
-	return mcp.NewTool("clawdchan_peer_remove",
-		mcp.WithDescription("HARD DELETE a peer plus all threads, envelopes, and outbox entries tied to them. Irreversible. Confirm with the user first using their own words — this is destructive. Only call when the user explicitly asks to 'remove', 'delete', or 'forget' a peer."),
-		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Peer to delete. Accepts hex, prefix, or alias.")),
-		mcp.WithBoolean("confirmed", mcp.Required(), mcp.Description("Must be true. Set only after the user has explicitly confirmed the destructive action in plain English.")),
-	)
-}
-
-func peerRemoveHandler(n *node.Node) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ref, err := req.RequireString("peer_id")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		confirmed := req.GetBool("confirmed", false)
-		if !confirmed {
-			return mcp.NewToolResultError("refusing to delete without confirmed=true. Ask the user explicitly and only then retry with confirmed=true."), nil
-		}
-		peerID, err := resolvePeerRef(ctx, n, ref)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		p, _ := n.GetPeer(ctx, peerID)
-		if err := n.DeletePeer(ctx, peerID); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return jsonResult(map[string]any{
-			"ok":      true,
-			"peer_id": hex.EncodeToString(peerID[:]),
-			"alias":   p.Alias,
-			"note":    "hard-deleted. All threads, envelopes, outbox entries for this peer are gone. Pairing would require a fresh mnemonic.",
 		}), nil
 	}
 }

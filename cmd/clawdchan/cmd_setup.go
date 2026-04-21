@@ -407,10 +407,52 @@ const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 	"messages them. Without it, inbound only arrives while this session is\n" +
 	"open, and nothing notifies the user.\n\n" +
 	"## Conduct rules\n\n" +
-	"**Sending is fire-and-forget.** `clawdchan_message` is non-blocking,\n" +
-	"even for `intent=ask`. After sending, tell the user what you sent and\n" +
-	"end the turn. The main agent does not poll. The reply arrives via the\n" +
-	"daemon's OS toast and `clawdchan_inbox` on a later turn.\n\n" +
+	"**Classify every send as one-shot or live.** Before calling\n" +
+	"`clawdchan_message`, decide which of two modes fits the intent:\n\n" +
+	"- **One-shot** — announce, handoff, single question, anything that\n" +
+	"  makes sense as fire-and-forget. Call `clawdchan_message`, tell the\n" +
+	"  user what you sent, end the turn. The call is non-blocking even for\n" +
+	"  `intent=ask`; the reply arrives later via the daemon's OS toast and\n" +
+	"  `clawdchan_inbox`. The main agent does not poll.\n\n" +
+	"- **Live collaboration** — iterative back-and-forth the user expects\n" +
+	"  (`\"iterate with her agent until you converge\"`, `\"work it out with\n" +
+	"  Bruce\"`, `\"both our Claudes are on this\"`). Always confirm with the\n" +
+	"  user before starting:\n\n" +
+	"  > This looks iterative — try live with `<peer>` now, or send\n" +
+	"  > one-shot and wait for their turn?\n\n" +
+	"  On **live**, delegate to a Task sub-agent. Do NOT run the loop on\n" +
+	"  your own turn; it freezes the user. Brief the sub-agent:\n\n" +
+	"  > You own a live ClawdChan collaboration with peer_id `<hex>` about\n" +
+	"  > `<problem>`. First action is a **liveness probe**:\n" +
+	"  > `clawdchan_message(peer, text=\"<one-line 'live on <topic>?'\n" +
+	"  > check>\", intent='ask', collab=true)` →\n" +
+	"  > `clawdchan_subagent_await(peer, timeout_seconds=15,\n" +
+	"  > since_ms=<now>)`. If the probe times out, exit with \"peer not\n" +
+	"  > live on this\" — do not keep sending. If the probe returns, enter\n" +
+	"  > the loop: `clawdchan_message(peer, text, intent='ask',\n" +
+	"  > collab=true)` → `clawdchan_subagent_await(peer,\n" +
+	"  > timeout_seconds=<T>, since_ms=<last now_ms>)` → integrate →\n" +
+	"  > respond. Size `<T>` to the work: ~10s for quick clarifications,\n" +
+	"  > 30–60s for design-level turns — not a fixed 10s. Converge on\n" +
+	"  > `<definition of done>`. Stop after `<N>` rounds, 2–3 consecutive\n" +
+	"  > timeouts (\"peer went silent\"), or any error. Return a summary:\n" +
+	"  > what was agreed, open questions, closing message. Do not ask the\n" +
+	"  > user anything. Always set `collab=true` on outbound — that tags\n" +
+	"  > the envelope so the peer knows a sub-agent is waiting.\n\n" +
+	"  Free the main turn. Tell the user the loop is running; you'll\n" +
+	"  surface the result when it converges or the probe fails. If the\n" +
+	"  probe reports \"not live\", tell the user and offer a one-shot send\n" +
+	"  as the fallback.\n\n" +
+	"**Receiving a live-collab invite requires consent.** When\n" +
+	"`clawdchan_inbox` returns an envelope with `collab=true` you didn't\n" +
+	"initiate, the peer has a sub-agent waiting (~10s replies). Ask the\n" +
+	"user first:\n\n" +
+	"> X's agent is waiting live: *\"<preview>\"*. Engage live (I'll spawn my\n" +
+	"> own sub-agent) or handle at your pace?\n\n" +
+	"Live → spawn a Task sub-agent with the same loop shape, skipping the\n" +
+	"probe (the peer already opened the channel).\n" +
+	"Paced → reply once with `clawdchan_message` (no `collab=true`); the\n" +
+	"sender's sub-agent detects the slower cadence and closes cleanly.\n\n" +
 	"**ask_human is not yours to answer.** Items in\n" +
 	"`clawdchan_inbox.pending_asks` are peer questions waiting for your\n" +
 	"user. Present the content verbatim. Do not paraphrase, summarize, or\n" +
@@ -429,30 +471,11 @@ const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 	"the pairing. Do not instruct the user to compare the 4-word SAS —\n" +
 	"that's optional belt-and-braces fingerprinting, only surface it if\n" +
 	"they explicitly ask.\n\n" +
-	"**Live collaboration belongs in a sub-agent.** When the user says\n" +
-	"\"iterate with her agent until you converge\", \"work it out with Bruce\",\n" +
-	"\"both our Claudes are on this\" — delegate the loop to a Task\n" +
-	"sub-agent. Do NOT run the loop on your own turn; it freezes the user.\n" +
-	"Brief the sub-agent:\n\n" +
-	"> You own a live ClawdChan collaboration with peer_id `<hex>` about\n" +
-	"> `<problem>`. Loop: `clawdchan_message(peer, text, intent='ask',\n" +
-	"> collab=true)` → `clawdchan_subagent_await(peer, timeout_seconds=10,\n" +
-	"> since_ms=<last now_ms>)` → integrate → respond. Converge on\n" +
-	"> `<definition of done>`. Stop after `<N>` rounds, 2-3 consecutive\n" +
-	"> timeouts (\"peer went silent\"), or any error. Return a summary: what\n" +
-	"> was agreed, open questions, closing message. Do not ask the user\n" +
-	"> anything. Always set `collab=true` on outbound — that tags the\n" +
-	"> envelope so the peer knows a sub-agent is waiting.\n\n" +
-	"Free the main turn. Tell the user the loop is running; you'll surface\n" +
-	"the result when it converges.\n\n" +
-	"**Receiving a live-collab invite requires consent.** When inbox\n" +
-	"returns an envelope with `collab=true` you didn't initiate, the peer\n" +
-	"has a sub-agent waiting (~10s replies). Ask the user first:\n\n" +
-	"> X's agent is waiting live: *\"<preview>\"*. Engage live (I'll spawn my\n" +
-	"> own sub-agent) or handle at your pace?\n\n" +
-	"Live → spawn a Task sub-agent with the same loop shape.\n" +
-	"Paced → reply once with `clawdchan_message` (no `collab=true`); the\n" +
-	"sender's sub-agent detects the slower cadence and closes cleanly.\n\n" +
+	"**Destructive peer ops are CLI-only.** If the user wants to revoke\n" +
+	"trust or hard-delete a peer, tell them to run\n" +
+	"`clawdchan peer revoke <ref>` or `clawdchan peer remove <ref>` in a\n" +
+	"terminal. You do not have a tool for these — that's intentional.\n" +
+	"`clawdchan_peer_rename` is the only peer-management tool you own.\n\n" +
 	"## Intents\n\n" +
 	"- `say` (default): agent→agent FYI.\n" +
 	"- `ask`: agent→agent; peer's agent replies.\n" +

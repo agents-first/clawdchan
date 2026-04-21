@@ -56,8 +56,7 @@ Claude never sees thread IDs.
 
 | Tool | Purpose | Args |
 |---|---|---|
-| `clawdchan_toolkit` | Capability list + setup status. Call once at session start. | – |
-| `clawdchan_whoami` | This node's id and alias. | – |
+| `clawdchan_toolkit` | Capability list + setup status + self (node id, alias, relay). Call once at session start. | – |
 | `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
 | `clawdchan_pair` | Generate a 12-word mnemonic; rendezvous completes in the background. | `timeout_seconds?` |
 | `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
@@ -66,7 +65,9 @@ Claude never sees thread IDs.
 | `clawdchan_subagent_await` | Short blocking wait (≤60s) for next inbound from a peer. Sub-agent tool only. | `peer_id`, `timeout_seconds?`, `since_ms?` |
 | `clawdchan_reply` | Submit the user's literal answer to a pending ask_human. | `peer_id`, `text` |
 | `clawdchan_decline` | Decline a pending ask_human. | `peer_id`, `reason?` |
-| `clawdchan_peer_rename` / `_revoke` / `_remove` | Manage paired peers by hex / prefix / alias. | – |
+| `clawdchan_peer_rename` | Change a peer's local display alias. | `peer_id`, `alias` |
+
+Revoke and hard-delete are intentionally CLI-only — `clawdchan peer revoke <ref>` and `clawdchan peer remove <ref>`. Keeping destructive verbs off the agent surface avoids mis-classifying "stop talking to Alice" as a revocation.
 
 Every envelope Claude sees carries two server-derived fields:
 

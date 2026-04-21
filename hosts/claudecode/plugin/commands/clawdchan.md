@@ -18,10 +18,61 @@ open, and nothing notifies the user.
 
 ## Conduct rules
 
-**Sending is fire-and-forget.** `clawdchan_message` is non-blocking,
-even for `intent=ask`. After sending, tell the user what you sent and
-end the turn. The main agent does not poll. The reply arrives via the
-daemon's OS toast and `clawdchan_inbox` on a later turn.
+**Classify every send as one-shot or live.** Before calling
+`clawdchan_message`, decide which of two modes fits the intent:
+
+- **One-shot** — announce, handoff, single question, anything that
+  makes sense as fire-and-forget. Call `clawdchan_message`, tell the
+  user what you sent, end the turn. The call is non-blocking even for
+  `intent=ask`; the reply arrives later via the daemon's OS toast and
+  `clawdchan_inbox`. The main agent does not poll.
+
+- **Live collaboration** — iterative back-and-forth the user expects
+  (`"iterate with her agent until you converge"`, `"work it out with
+  Bruce"`, `"both our Claudes are on this"`). Always confirm with the
+  user before starting:
+
+  > This looks iterative — try live with `<peer>` now, or send
+  > one-shot and wait for their turn?
+
+  On **live**, delegate to a Task sub-agent. Do NOT run the loop on
+  your own turn; it freezes the user. Brief the sub-agent:
+
+  > You own a live ClawdChan collaboration with peer_id `<hex>` about
+  > `<problem>`. First action is a **liveness probe**:
+  > `clawdchan_message(peer, text="<one-line 'live on <topic>?'
+  > check>", intent='ask', collab=true)` →
+  > `clawdchan_subagent_await(peer, timeout_seconds=15,
+  > since_ms=<now>)`. If the probe times out, exit with "peer not
+  > live on this" — do not keep sending. If the probe returns, enter
+  > the loop: `clawdchan_message(peer, text, intent='ask',
+  > collab=true)` → `clawdchan_subagent_await(peer,
+  > timeout_seconds=<T>, since_ms=<last now_ms>)` → integrate →
+  > respond. Size `<T>` to the work: ~10s for quick clarifications,
+  > 30–60s for design-level turns — not a fixed 10s. Converge on
+  > `<definition of done>`. Stop after `<N>` rounds, 2–3 consecutive
+  > timeouts ("peer went silent"), or any error. Return a summary:
+  > what was agreed, open questions, closing message. Do not ask the
+  > user anything. Always set `collab=true` on outbound — that tags
+  > the envelope so the peer knows a sub-agent is waiting.
+
+  Free the main turn. Tell the user the loop is running; you'll
+  surface the result when it converges or the probe fails. If the
+  probe reports "not live", tell the user and offer a one-shot send
+  as the fallback.
+
+**Receiving a live-collab invite requires consent.** When
+`clawdchan_inbox` returns an envelope with `collab=true` you didn't
+initiate, the peer has a sub-agent waiting (~10s replies). Ask the
+user first:
+
+> X's agent is waiting live: *"<preview>"*. Engage live (I'll spawn my
+> own sub-agent) or handle at your pace?
+
+Live → spawn a Task sub-agent with the same loop shape, skipping the
+probe (the peer already opened the channel).
+Paced → reply once with `clawdchan_message` (no `collab=true`); the
+sender's sub-agent detects the slower cadence and closes cleanly.
 
 **ask_human is not yours to answer.** Items in
 `clawdchan_inbox.pending_asks` are peer questions waiting for your
@@ -44,35 +95,11 @@ the pairing. Do not instruct the user to compare the 4-word SAS —
 that's optional belt-and-braces fingerprinting, only surface it if
 they explicitly ask.
 
-**Live collaboration belongs in a sub-agent.** When the user says
-"iterate with her agent until you converge", "work it out with Bruce",
-"both our Claudes are on this" — delegate the loop to a Task
-sub-agent. Do NOT run the loop on your own turn; it freezes the user.
-Brief the sub-agent:
-
-> You own a live ClawdChan collaboration with peer_id `<hex>` about
-> `<problem>`. Loop: `clawdchan_message(peer, text, intent='ask',
-> collab=true)` → `clawdchan_subagent_await(peer, timeout_seconds=10,
-> since_ms=<last now_ms>)` → integrate → respond. Converge on
-> `<definition of done>`. Stop after `<N>` rounds, 2-3 consecutive
-> timeouts ("peer went silent"), or any error. Return a summary: what
-> was agreed, open questions, closing message. Do not ask the user
-> anything. Always set `collab=true` on outbound — that tags the
-> envelope so the peer knows a sub-agent is waiting.
-
-Free the main turn. Tell the user the loop is running; you'll surface
-the result when it converges.
-
-**Receiving a live-collab invite requires consent.** When inbox
-returns an envelope with `collab=true` you didn't initiate, the peer
-has a sub-agent waiting (~10s replies). Ask the user first:
-
-> X's agent is waiting live: *"<preview>"*. Engage live (I'll spawn my
-> own sub-agent) or handle at your pace?
-
-Live → spawn a Task sub-agent with the same loop shape.
-Paced → reply once with `clawdchan_message` (no `collab=true`); the
-sender's sub-agent detects the slower cadence and closes cleanly.
+**Destructive peer ops are CLI-only.** If the user wants to revoke
+trust or hard-delete a peer, tell them to run
+`clawdchan peer revoke <ref>` or `clawdchan peer remove <ref>` in a
+terminal. You do not have a tool for these — that's intentional.
+`clawdchan_peer_rename` is the only peer-management tool you own.
 
 ## Intents
 
