@@ -62,12 +62,18 @@ func cmdSetup(args []string) error {
 		}
 	}
 
+	// warnings accumulate non-fatal issues from steps 2-5 so we can surface
+	// them together at the end and nudge the user toward `clawdchan doctor`
+	// instead of unconditionally claiming success.
+	var warnings []string
+
 	// Step 2: offer to write .mcp.json in the current project dir so CC
 	// auto-loads clawdchan-mcp. Skip in -y mode (unattended / CI).
 	stepHeader(2, "Claude Code project config")
 	if !*yes && stdinIsTTY() {
 		if err := setupProjectMCP(); err != nil {
 			fmt.Printf("note: .mcp.json step: %v\n", err)
+			warnings = append(warnings, fmt.Sprintf("Claude Code project config: %v", err))
 		}
 	} else {
 		fmt.Println("(non-interactive — skipped. Run `clawdchan init -write-mcp <dir>` to add later.)")
@@ -77,6 +83,7 @@ func cmdSetup(args []string) error {
 	stepHeader(3, "PATH")
 	if err := cmdPathSetup(nil); err != nil {
 		fmt.Printf("path-setup: %v\n", err)
+		warnings = append(warnings, fmt.Sprintf("PATH: %v", err))
 	}
 
 	// Step 4: optional OpenClaw wiring. Flags win over prompt. In -y mode with
@@ -85,6 +92,7 @@ func cmdSetup(args []string) error {
 	stepHeader(4, "OpenClaw gateway (optional)")
 	if err := setupOpenClaw(*yes, *openClawURL, *openClawToken, *openClawDeviceID); err != nil {
 		fmt.Printf("openclaw setup: %v\n", err)
+		warnings = append(warnings, fmt.Sprintf("OpenClaw: %v", err))
 	}
 
 	// Step 5: background daemon. Runs last so the service unit it writes
@@ -92,10 +100,21 @@ func cmdSetup(args []string) error {
 	stepHeader(5, "Background daemon")
 	if err := daemonSetup(nil); err != nil {
 		fmt.Printf("daemon setup: %v\n", err)
+		warnings = append(warnings, fmt.Sprintf("daemon: %v", err))
 	}
 
 	fmt.Println()
-	fmt.Println("✅ Setup complete. Next:")
+	if len(warnings) > 0 {
+		fmt.Printf("⚠ Setup finished with %d issue(s):\n", len(warnings))
+		for _, w := range warnings {
+			fmt.Printf("  - %s\n", w)
+		}
+		fmt.Println()
+		fmt.Println("Run `clawdchan doctor` to diagnose, then re-run `clawdchan setup` if needed.")
+		fmt.Println("Next:")
+	} else {
+		fmt.Println("✅ Setup complete. Next:")
+	}
 	fmt.Println("  1. Restart Claude Code so it loads the MCP server.")
 	fmt.Println(`  2. Ask Claude: "pair me with <friend> via clawdchan."`)
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
