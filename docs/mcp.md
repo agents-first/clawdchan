@@ -72,8 +72,7 @@ Revoke and hard-delete are intentionally CLI-only — `clawdchan peer revoke <re
 Every envelope Claude sees carries two server-derived fields:
 
 - `direction` — `"in"` for envelopes from the peer, `"out"` for
-  envelopes this node sent (whether by you or, if the user has
-  agent-dispatch configured, by the dispatcher subprocess).
+  envelopes this node sent.
 - `collab` — `true` when the envelope is part of a live agent-to-agent
   exchange (wire-level `Content.Title == "clawdchan:collab_sync"`).
 

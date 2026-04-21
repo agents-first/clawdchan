@@ -350,7 +350,7 @@ func inboxNotes(hasPending, hasCollab bool) []string {
 		notes = append(notes, "pending_asks carry the peer's ask_human verbatim. Present to the user, then clawdchan_reply with their literal words or clawdchan_decline. Do not compose an answer yourself.")
 	}
 	if hasCollab {
-		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting. If their side has no dispatcher, ask the user whether to engage live or reply at their own pace.")
+		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting — ask the user whether to engage live (spawn a Task sub-agent) or reply at their own pace.")
 	}
 	return notes
 }

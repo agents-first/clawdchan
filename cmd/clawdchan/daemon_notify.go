@@ -227,8 +227,8 @@ func notificationCopy(alias string, intent envelope.Intent, c envelope.Content, 
 }
 
 // isCollabSync reports whether c is a live-collab envelope by matching
-// the reserved Content.Title. The daemon keys off this to decide whether
-// to take the dispatcher path or fall through to the OS-toast path.
+// the reserved Content.Title. The daemon keys off this for differentiated
+// notification copy and active-session suppression.
 func isCollabSync(c envelope.Content) bool {
 	return c.Kind == envelope.ContentDigest && c.Title == policy.CollabSyncTitle
 }

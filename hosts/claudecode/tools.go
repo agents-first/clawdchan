@@ -229,7 +229,7 @@ func messageTool() mcp.Tool {
 				"  ask          — agent→agent, peer's agent is expected to reply\n"+
 				"  notify_human — agent→peer's human, FYI, no reply expected\n"+
 				"  ask_human    — agent→peer's HUMAN specifically; the peer's agent is forbidden from replying (their human must answer or decline)")),
-		mcp.WithBoolean("collab", mcp.Description("Set true only from inside a Task sub-agent running a live iterative loop. The envelope gets the clawdchan:collab_sync marker so the peer's daemon can auto-answer (if dispatch configured) or surface the live-loop choice to their human. Do not set this from the main agent.")),
+		mcp.WithBoolean("collab", mcp.Description("Set true only from inside a Task sub-agent running a live iterative loop. The envelope gets the clawdchan:collab_sync marker so the peer's daemon surfaces it as a live-collab invite (differentiated notification copy; suppressed debounce on follow-ups). Do not set this from the main agent.")),
 	)
 }
 
@@ -418,7 +418,7 @@ func inboxNotes(hasPending, hasCollab bool) []string {
 		notes = append(notes, "pending_asks carry the peer's ask_human verbatim. Present to the user, then clawdchan_reply with their literal words or clawdchan_decline. Do not compose an answer yourself.")
 	}
 	if hasCollab {
-		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting. If their side has no dispatcher, ask the user whether to engage live or reply at their own pace.")
+		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting — ask the user whether to engage live (spawn a Task sub-agent) or reply at their own pace.")
 	}
 	return notes
 }
