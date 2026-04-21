@@ -134,9 +134,17 @@ To opt into the receiver side of the dispatch path, edit
 }
 ```
 
-The daemon spawns `command` for each incoming `collab=true` ask, writes
-a JSON `DispatchRequest` on stdin, and expects one line of JSON on
-stdout:
+The daemon resolves `command[0]` via `exec.LookPath` at startup — if
+the binary is missing or not executable, `clawdchan daemon` refuses to
+start with an explicit error rather than silently declining every
+incoming collab-sync at runtime. The daemon logs
+`agent_dispatch: enabled ...` or `agent_dispatch: not configured ...`
+on start so you can confirm which path is live in
+`~/.clawdchan/daemon.log`.
+
+For each incoming `collab=true` ask, the daemon spawns the command,
+writes a JSON `DispatchRequest` on stdin, and expects one line of JSON
+on stdout:
 
 ```
 // request (partial — see core/policy/dispatch.go DispatchRequest for the full shape)
@@ -155,14 +163,30 @@ stdout:
 { "declined": "reason the peer will see" }
 ```
 
-Exit code 0 with an empty stdout, malformed JSON, and a timeout are all
-treated as declines. On decline, the daemon sends a
-`[collab-dispatch declined] <reason>` reply on the thread so the sender's
-sub-agent can exit its loop cleanly, and falls back to firing the usual
-OS notification so the user learns something happened. Max collab
-rounds is a hop ceiling: if the thread has more than
-`max_collab_rounds` collab-sync envelopes in its history, the daemon
-refuses to dispatch without even spawning the subprocess.
+### Failure modes
+
+The subprocess contract is strict: anything off the happy path becomes
+a decline. Each failure below maps to a
+`[collab-dispatch declined] <reason>` reply that the sender's
+sub-agent will see and can exit cleanly on, and fires the usual OS
+toast so the local user learns something happened.
+
+| What the subprocess does | What the daemon records | Reason string visible to sender |
+|---|---|---|
+| Exits non-zero | decline | `subprocess exited with status N: <stderr tail>` |
+| Exits 0 with empty stdout | decline | `subprocess returned no output` |
+| Writes malformed JSON | decline | `subprocess output not valid JSON` |
+| Writes valid JSON missing `answer` and `declined` | decline | `subprocess response missing answer` |
+| Runs longer than `timeout_seconds` | decline (killed) | `subprocess timed out after <N>s` |
+| Writes `{"declined": "..."}` | decline | the provided string verbatim |
+
+### Hop ceiling
+
+`max_collab_rounds` is a safety rail: if the thread already has more
+than that many collab-sync envelopes in its history, the daemon
+refuses to dispatch without spawning the subprocess at all. This
+keeps a runaway A→B→A→B loop from burning model tokens indefinitely
+when neither side is converging.
 
 ## Where state lives
 
