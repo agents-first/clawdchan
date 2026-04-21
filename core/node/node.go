@@ -11,14 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/pairing"
-	"github.com/vMaroon/ClawdChan/core/policy"
-	"github.com/vMaroon/ClawdChan/core/session"
-	"github.com/vMaroon/ClawdChan/core/store"
-	"github.com/vMaroon/ClawdChan/core/surface"
-	"github.com/vMaroon/ClawdChan/core/transport"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/core/policy"
+	"github.com/agents-first/ClawdChan/core/session"
+	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/core/transport"
 )
 
 // Config configures a Node.

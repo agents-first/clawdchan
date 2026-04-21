@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/node"
 )
 
 // cmdSetup is the one-command onboarding flow invoked by `make install`.

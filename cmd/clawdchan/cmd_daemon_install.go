@@ -17,8 +17,8 @@ import (
 
 	"github.com/mattn/go-isatty"
 
-	"github.com/vMaroon/ClawdChan/core/notify"
-	"github.com/vMaroon/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/ClawdChan/core/notify"
+	"github.com/agents-first/ClawdChan/internal/listenerreg"
 )
 
 const launchdLabel = "com.vmaroon.clawdchan.daemon"
@@ -70,6 +70,10 @@ func daemonSetup(args []string) error {
 	}
 
 	if !*yes {
+		if !stdinIsTTY() {
+			fmt.Println("  (non-interactive session — skipping daemon install. Run `clawdchan daemon install` to add it manually.)")
+			return nil
+		}
 		ok, err := promptYN("  Install the daemon now? [Y/n]: ", true)
 		if err != nil {
 			return err
@@ -101,12 +105,12 @@ func daemonAlreadyInstalled() bool {
 }
 
 // promptYN reads a Y/n answer from stdin. Returns defaultYes on EOF, empty
-// input, or when stdin is not a terminal (so non-interactive `make install`
-// from a CI harness silently skips rather than guessing).
+// input, or when stdin is not a terminal (so non-interactive callers silently
+// fall back to the default rather than guessing). Callers that want a
+// context-specific non-TTY message should check stdinIsTTY() themselves.
 func promptYN(prompt string, defaultYes bool) (bool, error) {
 	if !stdinIsTTY() {
-		fmt.Println("(non-interactive session — skipping daemon install. Run `clawdchan daemon install` to add it manually.)")
-		return false, nil
+		return defaultYes, nil
 	}
 	fmt.Print(prompt)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')

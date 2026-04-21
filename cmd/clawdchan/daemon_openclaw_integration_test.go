@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agents-first/ClawdChan/internal/relayserver"
 	"github.com/gorilla/websocket"
-	"github.com/vMaroon/ClawdChan/internal/relayserver"
 )
 
 type testGatewayMessage struct {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/surface"
 )
 
 func TestHumanSurfaceAskReturnsErrAsyncReply(t *testing.T) {

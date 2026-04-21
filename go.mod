@@ -1,4 +1,4 @@
-module github.com/vMaroon/ClawdChan
+module github.com/agents-first/ClawdChan
 
 go 1.25.0
 

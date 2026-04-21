@@ -19,9 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/node"
 	"github.com/gorilla/websocket"
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/node"
 )
 
 var errBridgeClosed = errors.New("openclaw: bridge closed")

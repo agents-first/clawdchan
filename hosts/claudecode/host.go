@@ -12,8 +12,8 @@ package claudecode
 import (
 	"context"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/surface"
 )
 
 // HumanSurface is the CC-host implementation of surface.HumanSurface. All

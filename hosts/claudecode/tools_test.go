@@ -3,9 +3,9 @@ package claudecode
 import (
 	"testing"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/hosts"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/hosts"
 )
 
 // TestPendingAsks verifies the ask_human enforcement invariant: a remote

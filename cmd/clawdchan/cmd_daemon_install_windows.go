@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/vMaroon/ClawdChan/core/notify"
+	"github.com/agents-first/ClawdChan/core/notify"
 )
 
 // registerWindowsAppID writes the HKCU\Software\Classes\AppUserModelId entry

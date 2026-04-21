@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/identity"
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/core/pairing"
+	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/pairing"
 )
 
 // cmdPeer dispatches peer-management subcommands:
@@ -18,7 +19,7 @@ import (
 //	clawdchan peer show     <ref>           # details for one peer
 //	clawdchan peer rename   <ref> <alias>   # change local display alias
 //	clawdchan peer revoke   <ref>           # mark trust revoked (keep history)
-//	clawdchan peer remove   <ref>           # hard delete (peer + threads + envelopes)
+//	clawdchan peer remove   [-y] <ref>...   # hard delete (peer + threads + envelopes)
 //
 // <ref> matches the peer by any of:
 //   - full 64-char hex node id
@@ -59,10 +60,7 @@ func cmdPeer(args []string) error {
 		}
 		return peerRevoke(ctx, n, rest[0])
 	case "remove", "delete", "forget":
-		if len(rest) < 1 {
-			return errors.New("usage: clawdchan peer remove <ref>")
-		}
-		return peerRemove(ctx, n, rest[0])
+		return peerRemoveCmd(ctx, n, rest)
 	default:
 		return fmt.Errorf("unknown peer subcommand %q (use show|rename|revoke|remove)", sub)
 	}
@@ -110,20 +108,47 @@ func peerRevoke(ctx context.Context, n *node.Node, ref string) error {
 	return nil
 }
 
-func peerRemove(ctx context.Context, n *node.Node, ref string) error {
+// peerRemoveCmd parses flags for `peer remove` and dispatches to peerRemove
+// for each ref. Accepts one or more refs so callers can batch-delete in a
+// single invocation (e.g. `peer remove -y a b c`) without shell loops.
+func peerRemoveCmd(ctx context.Context, n *node.Node, args []string) error {
+	fs := flag.NewFlagSet("peer remove", flag.ContinueOnError)
+	yes := fs.Bool("y", false, "skip the confirmation prompt (required for non-interactive use)")
+	fs.BoolVar(yes, "yes", false, "alias for -y")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	refs := fs.Args()
+	if len(refs) == 0 {
+		return errors.New("usage: clawdchan peer remove [-y] <ref> [ref...]")
+	}
+	if !*yes && !stdinIsTTY() {
+		return errors.New("peer remove needs confirmation; re-run with -y on non-interactive stdin")
+	}
+	for _, ref := range refs {
+		if err := peerRemove(ctx, n, ref, *yes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func peerRemove(ctx context.Context, n *node.Node, ref string, skipConfirm bool) error {
 	p, err := resolvePeer(ctx, n, ref)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("About to HARD DELETE peer %q (%s) plus all threads, envelopes, and outbox entries.\n",
-		p.Alias, hex.EncodeToString(p.NodeID[:])[:16])
-	ok, err := promptYN("This cannot be undone. Continue? [y/N]: ", false)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		fmt.Println("cancelled.")
-		return nil
+	if !skipConfirm {
+		fmt.Printf("About to HARD DELETE peer %q (%s) plus all threads, envelopes, and outbox entries.\n",
+			p.Alias, hex.EncodeToString(p.NodeID[:])[:16])
+		ok, err := promptYN("This cannot be undone. Continue? [y/N]: ", false)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Printf("cancelled %q.\n", p.Alias)
+			return nil
+		}
 	}
 	if err := n.DeletePeer(ctx, p.NodeID); err != nil {
 		return err

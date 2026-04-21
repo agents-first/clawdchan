@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/envelope"
 )
 
 var mnemonicPattern = regexp.MustCompile(`[a-z]+(?: [a-z]+){11}`)

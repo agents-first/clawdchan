@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/store"
-	"github.com/vMaroon/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/ClawdChan/core/surface"
 )
 
 type sessionsSender interface {

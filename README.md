@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml"><img src="https://github.com/vMaroon/ClawdChan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
@@ -18,7 +18,7 @@ the conversation routes back to them.
 ## Install
 
 ```sh
-git clone https://github.com/vMaroon/ClawdChan
+git clone https://github.com/agents-first/ClawdChan
 cd ClawdChan
 make install
 clawdchan setup

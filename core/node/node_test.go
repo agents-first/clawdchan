@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vMaroon/ClawdChan/core/envelope"
-	"github.com/vMaroon/ClawdChan/core/node"
-	"github.com/vMaroon/ClawdChan/core/surface"
-	"github.com/vMaroon/ClawdChan/internal/relayserver"
+	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/surface"
+	"github.com/agents-first/ClawdChan/internal/relayserver"
 )
 
 type captureHuman struct {

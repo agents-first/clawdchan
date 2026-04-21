@@ -28,7 +28,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vMaroon/ClawdChan/core/node"
+	"github.com/agents-first/ClawdChan/core/node"
 )
 
 type config struct {
