@@ -44,9 +44,13 @@ func RegisterTools(s *server.MCPServer, n *node.Node) {
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
 		mcp.WithDescription("Return current setup state (daemon presence), peer-ref rules, "+
-			"and the intent catalog. Call once at session start. Conduct rules for using the other tools live in "+
-			"the operator manual that ships as the /clawdchan slash command and as CLAWDCHAN_GUIDE.md in OpenClaw "+
-			"workspaces — read that for behavior, use this response for current-state awareness."),
+			"and the intent catalog. Call once at session start. If the response's "+
+			"setup.needs_persistent_listener is true, surface setup.user_message to the user "+
+			"verbatim and pause before proceeding — without a daemon the user's inbound path "+
+			"dies with this Claude Code session. Conduct rules for using the other tools live "+
+			"in the operator manual that ships as the /clawdchan slash command and as "+
+			"CLAWDCHAN_GUIDE.md in OpenClaw workspaces — read that for behavior, use this "+
+			"response for current-state awareness."),
 	)
 }
 
@@ -464,7 +468,11 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 func consumeTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_consume",
 		mcp.WithDescription("Consume a peer's 12-word pairing mnemonic and complete the pairing. The mnemonic is a "+
-			"one-shot rendezvous code for this pairing only, not a wallet recovery seed."),
+			"one-shot rendezvous code for this pairing only, not a wallet recovery seed. "+
+			"SECURITY: before consuming, confirm with the user that the 12 words came directly "+
+			"from the intended peer over a trusted channel (voice, Signal, in person) — not "+
+			"forwarded via email, Slack, or a third-party relay. Consuming an attacker-injected "+
+			"mnemonic pairs the user with the attacker instead."),
 		mcp.WithString("mnemonic", mcp.Required(), mcp.Description("12 space-separated BIP-39 words from the peer's clawdchan_pair output.")),
 	)
 }
