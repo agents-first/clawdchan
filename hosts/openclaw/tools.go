@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
 	"github.com/agents-first/ClawdChan/core/node"
 	"github.com/agents-first/ClawdChan/core/policy"
 	"github.com/agents-first/ClawdChan/hosts"
@@ -178,6 +179,14 @@ func messageHandler(n *node.Node) ToolHandler {
 func inboxHandler(n *node.Node) ToolHandler {
 	return func(ctx context.Context, params map[string]any) (string, error) {
 		since := int64(getFloat(params, "since_ms", 0))
+		var peerFilter *identity.NodeID
+		if ref := strings.TrimSpace(getString(params, "peer_id", "")); ref != "" {
+			pid, err := hosts.ResolvePeerRef(ctx, n, ref)
+			if err != nil {
+				return "", err
+			}
+			peerFilter = &pid
+		}
 		wait := getFloat(params, "wait_seconds", 0)
 		if wait < 0 {
 			wait = 0
@@ -191,7 +200,7 @@ func inboxHandler(n *node.Node) ToolHandler {
 		deadline := time.Now().Add(time.Duration(wait * float64(time.Second)))
 		const pollInterval = 400 * time.Millisecond
 		for {
-			out, anyTraffic, hasPending, hasCollab, nowMs, err := hosts.CollectInbox(ctx, n, since, headersOnly)
+			out, anyTraffic, hasPending, hasCollab, nowMs, err := hosts.CollectInbox(ctx, n, since, headersOnly, peerFilter)
 			if err != nil {
 				return "", err
 			}

@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/ClawdChan/core/identity"
 	"github.com/agents-first/ClawdChan/core/node"
 	"github.com/agents-first/ClawdChan/core/policy"
 	"github.com/agents-first/ClawdChan/hosts"
@@ -220,7 +221,10 @@ func inboxTool() mcp.Tool {
 		mcp.WithDescription("Envelopes per peer, plus pending ask_human awaiting the user. Each envelope carries "+
 			"`direction` (in/out) and `collab` (true for live-exchange markers). Feed the returned `now_ms` back "+
 			"as `since_ms` next call for only new traffic. Pass `wait_seconds` (≤15) to long-poll when you've just "+
-			"sent something and want to check back cheaply — returns early if anything lands."),
+			"sent something and want to check back cheaply — returns early if anything lands. Pass `peer_id` to "+
+			"scope the view to one peer; other peers' envelopes stay on disk and still arrive via daemon toasts, "+
+			"they're just omitted from this response to keep context tight."),
+		mcp.WithString("peer_id", mcp.Description("Hex, hex-prefix (>=4), or exact alias. Omit to see all peers.")),
 		mcp.WithNumber("since_ms", mcp.Description("Only include non-pending envelopes created after this ms timestamp.")),
 		mcp.WithNumber("wait_seconds", mcp.Description("Long-poll up to N seconds (max 15). 0 = non-blocking.")),
 		mcp.WithString("include", mcp.Description("'full' (default) or 'headers' to drop content bodies for cheap long-thread polling.")),
@@ -231,6 +235,14 @@ func inboxTool() mcp.Tool {
 func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		since := int64(req.GetFloat("since_ms", 0))
+		var peerFilter *identity.NodeID
+		if ref := strings.TrimSpace(req.GetString("peer_id", "")); ref != "" {
+			pid, err := hosts.ResolvePeerRef(ctx, n, ref)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			peerFilter = &pid
+		}
 		wait := req.GetFloat("wait_seconds", 0)
 		if wait < 0 {
 			wait = 0
@@ -244,7 +256,7 @@ func inboxHandler(n *node.Node) server.ToolHandlerFunc {
 		deadline := time.Now().Add(time.Duration(wait * float64(time.Second)))
 		const pollInterval = 400 * time.Millisecond
 		for {
-			out, anyTraffic, hasPending, hasCollab, nowMs, err := hosts.CollectInbox(ctx, n, since, headersOnly)
+			out, anyTraffic, hasPending, hasCollab, nowMs, err := hosts.CollectInbox(ctx, n, since, headersOnly, peerFilter)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

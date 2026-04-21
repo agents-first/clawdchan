@@ -383,7 +383,7 @@ func BuildToolkitBase(n *node.Node, setup map[string]any) map[string]any {
 // CollectInbox assembles the grouped-by-peer inbox view. Returns the peer
 // buckets, whether any traffic or pending asks exist, whether any collab
 // envelope is present, and the current timestamp.
-func CollectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bool) ([]map[string]any, bool, bool, bool, int64, error) {
+func CollectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bool, peerFilter *identity.NodeID) ([]map[string]any, bool, bool, bool, int64, error) {
 	threads, err := n.ListThreads(ctx)
 	if err != nil {
 		return nil, false, false, false, 0, err
@@ -399,6 +399,9 @@ func CollectInbox(ctx context.Context, n *node.Node, since int64, headersOnly bo
 	hasPending, hasCollab := false, false
 
 	for _, t := range threads {
+		if peerFilter != nil && t.PeerID != *peerFilter {
+			continue
+		}
 		envs, err := n.ListEnvelopes(ctx, t.ID, 0)
 		if err != nil {
 			continue

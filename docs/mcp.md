@@ -61,7 +61,7 @@ Claude never sees thread IDs.
 | `clawdchan_pair` | Generate a 12-word mnemonic; rendezvous completes in the background. | `timeout_seconds?` |
 | `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
 | `clawdchan_message` | Send to a peer. Non-blocking. | `peer_id`, `text`, `intent?`, `collab?` |
-| `clawdchan_inbox` | Envelopes per peer with `direction` and `collab` flags; pending ask_human surfaces; optional long-poll. | `since_ms?`, `wait_seconds?`, `include?`, `notes_seen?` |
+| `clawdchan_inbox` | Envelopes per peer with `direction` and `collab` flags; pending ask_human surfaces; optional long-poll. Pass `peer_id` to scope the view to a single peer. | `peer_id?`, `since_ms?`, `wait_seconds?`, `include?`, `notes_seen?` |
 | `clawdchan_subagent_await` | Short blocking wait (≤60s) for next inbound from a peer. Sub-agent tool only. | `peer_id`, `timeout_seconds?`, `since_ms?` |
 | `clawdchan_reply` | Submit the user's literal answer to a pending ask_human. | `peer_id`, `text` |
 | `clawdchan_decline` | Decline a pending ask_human. | `peer_id`, `reason?` |
@@ -80,8 +80,12 @@ No hex compare, no title pattern-match needed.
 
 ### Long-poll and headers-only inbox
 
-`clawdchan_inbox` accepts three optional modes:
+`clawdchan_inbox` accepts four optional modes:
 
+- `peer_id` — scopes the response to a single peer (hex, hex-prefix ≥4, or
+  alias). Other peers' envelopes stay on disk and are still delivered via
+  the daemon's toast path; they're just omitted from this response so the
+  agent's context stays small when it only cares about one conversation.
 - `wait_seconds` (0–15) — blocks server-side until anything newer than
   `since_ms` exists, or the timeout elapses. Cheap alternative to
   sleep-and-poll from the main agent. Use between user turns; use
