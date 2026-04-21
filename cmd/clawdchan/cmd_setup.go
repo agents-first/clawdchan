@@ -467,6 +467,24 @@ const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 func deployOpenClawAssets(yes bool) {
 	deployOpenClawAgentAssets()
 	_ = registerClawdChanMCP()
+
+	// The gateway caches scopes at connect-time, so a rewrite demands an
+	// unconditional restart — bypass the interactive prompt in that branch.
+	scopesChanged, err := ensureOpenClawOperatorScopes()
+	if err != nil {
+		fmt.Printf("[warn] could not update OpenClaw operator scopes: %v\n", err)
+	} else if scopesChanged {
+		fmt.Println("[ok] OpenClaw operator scopes updated (added operator.write + operator.admin)")
+		fmt.Print("Restarting OpenClaw gateway to apply scopes... ")
+		if err := exec.Command("openclaw", "gateway", "restart").Run(); err != nil {
+			fmt.Printf("failed: %v\n", err)
+			fmt.Println("    Run `openclaw gateway restart` manually, then reconnect subagents.")
+		} else {
+			fmt.Println("done.")
+		}
+		return
+	}
+
 	if !yes && stdinIsTTY() {
 		restartOpenClawGateway()
 	}
