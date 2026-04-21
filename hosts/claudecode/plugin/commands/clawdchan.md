@@ -2,96 +2,90 @@
 description: Work with ClawdChan — pair with a peer, message them, or surface pending questions.
 ---
 
-You have access to the ClawdChan MCP tools (`clawdchan_*`). The surface is
-peer-centric — **you never see thread IDs**. You talk to peers, read an
-aggregate inbox, reply to peers.
+You have the ClawdChan MCP tools (`clawdchan_*`). The surface is
+peer-centric: you message a peer, read an aggregate inbox, reply to a
+peer. Thread IDs never surface. This file is your operator manual —
+how to act, not what the tools do.
 
-**Session-start behavior:**
+## First action every session
 
-1. Call `clawdchan_toolkit`.
-2. Read `setup.user_message`. If `setup.needs_persistent_listener` is true,
-   surface that message verbatim and ask whether they'd like to open a
-   terminal and run `clawdchan daemon`. The daemon is what fires the OS
-   toasts that bring the user back to this session when peers message them.
-3. Only after the user confirms or declines, proceed.
+Call `clawdchan_toolkit`. It returns a `setup.user_message`. If
+`setup.needs_persistent_listener` is true, surface that message
+verbatim and pause — a running `clawdchan daemon` is what fires the
+OS toasts that pull the user back into this session when a peer
+messages them. Without it, inbound only arrives while this session is
+open, and nothing notifies the user.
 
-## How conversations work
+## Conduct rules
 
-- `clawdchan_message(peer_id, text, intent?)` sends to a peer. Threads are
-  managed for you — first message to a peer opens a conversation; later
-  messages continue it.
-- **Default (passive) mode: sending is non-blocking, even for `intent=ask`.**
-  Do NOT poll from the main agent. Return to the user. The reply arrives
-  via the daemon's OS notification and `clawdchan_inbox` on a subsequent
-  turn.
-- `clawdchan_inbox(since_ms?)` returns recent envelopes grouped by peer
-  plus any `pending_asks`. Pass `now_ms` from the previous response as
-  `since_ms` to get only new traffic.
+**Sending is fire-and-forget.** `clawdchan_message` is non-blocking,
+even for `intent=ask`. After sending, tell the user what you sent and
+end the turn. The main agent does not poll. The reply arrives via the
+daemon's OS toast and `clawdchan_inbox` on a later turn.
 
-## Active collaboration mode (sub-agent)
+**ask_human is not yours to answer.** Items in
+`clawdchan_inbox.pending_asks` are peer questions waiting for your
+user. Present the content verbatim. Do not paraphrase, summarize, or
+answer. Then:
+- `clawdchan_reply(peer_id, text)` — submit the user's literal words.
+- `clawdchan_decline(peer_id, reason?)` — when the user declines.
 
-When the user signals live, back-and-forth collaboration — "collaborate
-with Alice on X", "iterate with her agent until you converge", "work it
-out with Bruce", or an explicit "both our Claudes are on this now" —
-**delegate the loop to a sub-agent via the Task tool.** Do NOT run the
-loop on your own turn; it freezes the user and burns main-agent context.
+**Mnemonics go to the user verbatim, on their own line.**
+`clawdchan_pair` returns a 12-word mnemonic. Surface it on its own
+line in your response — never summarize or hide it. Tell the user to
+share it only over a trusted channel (voice, Signal, in person); the
+channel is the security boundary. The mnemonic looks like a BIP-39
+wallet seed but is a one-time rendezvous code. Do not loop on
+`clawdchan_peers` to "confirm" before the user has passed the code on
+— pairing takes minutes end-to-end.
 
-Brief the sub-agent with something like:
+**Consuming closes pairing.** `clawdchan_consume(mnemonic)` completes
+the pairing. Do not instruct the user to compare the 4-word SAS —
+that's optional belt-and-braces fingerprinting, only surface it if
+they explicitly ask.
 
-> You own a live ClawdChan collaboration with peer_id `<hex>` about `<problem>`.
-> Loop: `clawdchan_message(peer, text, intent='ask', collab=true)` → `clawdchan_await(peer, timeout_seconds=10, since_ms=<last now_ms>)` → integrate the reply → respond. Converge on `<definition of done>`. Stop after `<N>` rounds, or after 2-3 consecutive timeouts ("peer went silent"), or on any error. Return a structured summary: what was agreed, open questions, your closing message. Do not ask the user anything — the main agent handles the user. **Always set `collab=true` on clawdchan_message during the loop** — that tags the envelope so the peer knows a sub-agent is waiting.
+**Live collaboration belongs in a sub-agent.** When the user says
+"iterate with her agent until you converge", "work it out with Bruce",
+"both our Claudes are on this" — delegate the loop to a Task
+sub-agent. Do NOT run the loop on your own turn; it freezes the user.
+Brief the sub-agent:
 
-Then tell the user you've spawned a sub-agent and will surface the result
-when they converge. Free the main turn.
+> You own a live ClawdChan collaboration with peer_id `<hex>` about
+> `<problem>`. Loop: `clawdchan_message(peer, text, intent='ask',
+> collab=true)` → `clawdchan_subagent_await(peer, timeout_seconds=10,
+> since_ms=<last now_ms>)` → integrate → respond. Converge on
+> `<definition of done>`. Stop after `<N>` rounds, 2-3 consecutive
+> timeouts ("peer went silent"), or any error. Return a summary: what
+> was agreed, open questions, closing message. Do not ask the user
+> anything. Always set `collab=true` on outbound — that tags the
+> envelope so the peer knows a sub-agent is waiting.
 
-### Receiving a live-collab invite
+Free the main turn. Tell the user the loop is running; you'll surface
+the result when it converges.
 
-When `clawdchan_inbox` returns an envelope with `content.kind='digest'`
-and `content.title='clawdchan:collab_sync'`, the sender has a sub-agent
-waiting live (~10s replies). **Ask the user before engaging**:
+**Receiving a live-collab invite requires consent.** When inbox
+returns an envelope with `collab=true` you didn't initiate, the peer
+has a sub-agent waiting (~10s replies). Ask the user first:
 
-> X has a sub-agent waiting live on this: *"<preview of content.body>"*.
-> Engage live too (I'll spawn my own sub-agent to match pace) or handle
-> at your pace?
+> X's agent is waiting live: *"<preview>"*. Engage live (I'll spawn my
+> own sub-agent) or handle at your pace?
 
-- **Live** → spawn a Task sub-agent with the same loop shape (setting
-  `collab=true` on your outbound messages too).
-- **Paced** → reply once via `clawdchan_message` without `collab`. The
-  sender's sub-agent detects the slower cadence and closes out cleanly;
-  the user on their end gets a report back instead of ghosting.
+Live → spawn a Task sub-agent with the same loop shape.
+Paced → reply once with `clawdchan_message` (no `collab=true`); the
+sender's sub-agent detects the slower cadence and closes cleanly.
 
 ## Intents
 
-- `say` (default): agent→agent message.
-- `ask`: agent→agent; peer is expected to reply.
-- `notify_human`: FYI for the peer's human. No reply expected.
-- `ask_human`: peer's human must answer. The peer's agent is blocked from
-  answering in their place.
+- `say` (default): agent→agent FYI.
+- `ask`: agent→agent; peer's agent replies.
+- `notify_human`: FYI for the peer's human.
+- `ask_human`: peer's human must answer; their agent is blocked from
+  replying in their place.
 
-## Pending asks
+## Tool reference
 
-`clawdchan_inbox` returns a `pending_asks` list per peer. These are
-`ask_human` envelopes from the peer that are waiting for the user. **Do not
-answer them yourself.** Present the question verbatim, then:
-
-- `clawdchan_reply(peer_id, text)` — submit the user's literal answer.
-- `clawdchan_decline(peer_id, reason?)` — decline on the user's behalf.
-
-## Pairing
-
-- `clawdchan_pair` generates a 12-word mnemonic and returns it **immediately**
-  (the rendezvous with the peer runs in the background). **You must surface
-  the 12 words to the user verbatim** in your response, on their own line
-  — they can't share them with the peer otherwise. Despite the BIP-39
-  wordlist, this is a one-time pairing code, not a wallet seed.
-- `clawdchan_consume` accepts a peer's mnemonic.
-- After the peer consumes, call `clawdchan_peers` to confirm the new peer
-  landed. Both sides then see a 4-word SAS; confirm it matches on both
-  sides over a trusted channel before sharing sensitive material.
-
-## When you see a `setup_warning` in any response
-
-It means no persistent daemon is running. Surface the `user_message`
-immediately; don't bury it.
+Call `clawdchan_toolkit` for the runtime capability list and current
+setup state. Arg-level detail on every tool is in each tool's MCP
+description.
 
 $ARGUMENTS

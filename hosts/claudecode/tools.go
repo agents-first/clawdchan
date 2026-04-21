@@ -76,8 +76,10 @@ func WithDispatchEnabled(enabled bool) Option {
 
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
-		mcp.WithDescription("Return the full ClawdChan tool surface with a recommended workflow. "+
-			"Call once at session start."),
+		mcp.WithDescription("Return current setup state (daemon presence, dispatch availability), peer-ref rules, "+
+			"and the intent catalog. Call once at session start. Conduct rules for using the other tools live in "+
+			"the operator manual that ships as the /clawdchan slash command and as CLAWDCHAN_GUIDE.md in OpenClaw "+
+			"workspaces — read that for behavior, use this response for current-state awareness."),
 	)
 }
 
@@ -97,7 +99,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 		}
 
 		return jsonResult(map[string]any{
-			"version": "0.3",
+			"version": "0.4",
 			"self": map[string]any{
 				"node_id": hex.EncodeToString(id[:]),
 				"alias":   n.Alias(),
@@ -113,19 +115,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
 				{"name": "notify_human", "desc": "Agent→peer's HUMAN, FYI, no reply expected."},
 				{"name": "ask_human", "desc": "Agent→peer's HUMAN specifically; the peer's agent is forbidden from replying."},
 			},
-			"model": []string{
-				"Threads are internal. You talk to peers. First message opens a conversation; later messages continue it.",
-				"Every envelope carries `direction` (in/out) and `collab` (true for live-exchange markers). No hex compares, no title pattern-matching.",
-				"`clawdchan_message` is non-blocking even for ask. Default flow: send, end the turn, let the daemon toast the user when a reply lands. The main agent does NOT poll.",
-				"Live iterative collab loops belong in a Task sub-agent. Brief it (peer, problem, convergence criterion, max rounds), let it run `clawdchan_message(collab=true)` + `clawdchan_subagent_await` until done, fold its summary into your reply to the user.",
-				"Receiving side, collab=true inbound, no local dispatcher: ask the user once — engage live (spawn your own sub-agent) or reply at their pace.",
-				"ask_human is the peer's human's to answer. Use `clawdchan_reply` with the user's literal words or `clawdchan_decline`. Never compose an answer yourself.",
-				"The daemon fires OS notifications on inbound. Tell the user you'll surface replies on their next turn — don't implement polling yourself.",
-			},
-			"notes": []string{
-				"Mnemonics are 12 BIP-39 words — one-time pairing codes, not wallet seeds. Always surface them to the user verbatim.",
-				"The mnemonic channel IS the security boundary: tell the user to share the 12 words only over a trusted channel (voice, Signal, in person). Each peer record also carries a 4-word SAS in clawdchan_peers that advanced users can compare out-of-band if they want belt-and-braces verification — not required by default.",
-			},
+			"behavior_guide": "Conduct rules (send and end the turn; surface mnemonics verbatim; never answer ask_human; delegate live loops to a Task sub-agent) are in /clawdchan and in CLAWDCHAN_GUIDE.md. Don't re-derive them from the inbox shape.",
 		}), nil
 	}
 }
@@ -200,19 +190,6 @@ func buildSetupStatus(n *node.Node) map[string]any {
 }
 
 var osGetpid = func() int { return os.Getpid() }
-
-func maybeAttachListenerWarning(n *node.Node) map[string]any {
-	setup := buildSetupStatus(n)
-	needs, _ := setup["needs_persistent_listener"].(bool)
-	if !needs {
-		return nil
-	}
-	return map[string]any{
-		"needs_persistent_listener": true,
-		"user_message":              setup["user_message"],
-		"listener_command":          setup["listener_command"],
-	}
-}
 
 // --- whoami -----------------------------------------------------------------
 
@@ -366,9 +343,6 @@ func messageHandler(n *node.Node) server.ToolHandlerFunc {
 		// the agent's next action.
 		if hasOpenAskHumanFromPeer(ctx, n, peerID) {
 			out["pending_ask_hint"] = "This peer has an unanswered ask_human pending the user. If your text was meant as the user's answer, use clawdchan_reply instead of clawdchan_message. If it's an additional message for the peer's agent, disregard this hint."
-		}
-		if w := maybeAttachListenerWarning(n); w != nil {
-			out["setup_warning"] = w
 		}
 		return jsonResult(out), nil
 	}
@@ -711,7 +685,7 @@ func replyTool() mcp.Tool {
 		mcp.WithDescription("Submit the user's answer to the peer's pending ask_human. Routed to the latest thread "+
 			"with the peer that has an unanswered ask_human. The envelope is sent with role=human — only call this "+
 			"with the user's actual words, never with your own paraphrase."),
-		mcp.WithString("peer_id", mcp.Required()),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex node id, unique hex prefix (>=4), or exact alias.")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("The user's literal answer.")),
 	)
 }
@@ -744,7 +718,7 @@ func replyHandler(n *node.Node) server.ToolHandlerFunc {
 func declineTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_decline",
 		mcp.WithDescription("Decline the peer's pending ask_human on behalf of the user. Sends role=human with a declination so the peer knows the ask was surfaced but won't be answered."),
-		mcp.WithString("peer_id", mcp.Required()),
+		mcp.WithString("peer_id", mcp.Required(), mcp.Description("Hex node id, unique hex prefix (>=4), or exact alias.")),
 		mcp.WithString("reason", mcp.Description("Optional short reason shown to the peer. Default: 'declined by user'.")),
 	)
 }
@@ -840,12 +814,11 @@ func pendingAsks(envs []envelope.Envelope, me identity.NodeID) map[envelope.ULID
 
 func pairTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_pair",
-		mcp.WithDescription("Generate a pairing mnemonic and return it IMMEDIATELY — the rendezvous with the peer "+
-			"happens in the background. You MUST surface the 12-word mnemonic to the user verbatim in your response; "+
-			"it's the only way for them to share it with the peer. Do not hide it behind a summary. "+
-			"Tell the user: 'share these 12 words with your peer, they run clawdchan_consume on their side'. "+
-			"To confirm pairing completed, call clawdchan_peers — a new peer means the rendezvous succeeded. "+
-			"The mnemonic is a one-time rendezvous code, not a wallet seed."),
+		mcp.WithDescription("Generate a 12-word pairing mnemonic. Returns immediately; rendezvous runs in the "+
+			"background. Surface the 12 words to the user verbatim on their own line — that's the only way they can "+
+			"pass it to the peer. Looks like a BIP-39 wallet seed but is a one-time rendezvous code, and the channel "+
+			"the user shares it over IS the security boundary (voice, Signal, in person). Call clawdchan_peers after "+
+			"a minute to confirm the peer landed."),
 		mcp.WithNumber("timeout_seconds", mcp.Description("Background rendezvous timeout. Default 300.")),
 	)
 }
@@ -870,19 +843,9 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 		}()
 
 		out := map[string]any{
-			"mnemonic":          code.Mnemonic(),
-			"status":            "pending_peer_consume",
-			"timeout_seconds":   int(timeout.Seconds()),
-			"agent_instruction": "Show the user the 12-word mnemonic verbatim in your response, on its own line, so they can copy-paste it. Then tell them: 'Share these 12 words with your peer; they run clawdchan_consume on their side. Call clawdchan_peers after a minute or so to confirm the new peer landed.'",
-			"next_steps_for_user": []string{
-				"Share the 12-word mnemonic with the other person (voice, signal, any trusted channel).",
-				"They run clawdchan_consume on their node with the same words.",
-				"Once they do, their node will appear in clawdchan_peers here.",
-			},
-			"security_note": "Mnemonics look like BIP-39 wallet seeds but are one-time rendezvous codes. The channel you share them over IS the security boundary — pick one you trust (voice, Signal, in person). Each peer also carries a 4-word SAS in clawdchan_peers for optional out-of-band comparison; most users won't need it.",
-		}
-		if w := maybeAttachListenerWarning(n); w != nil {
-			out["setup_warning"] = w
+			"mnemonic":        code.Mnemonic(),
+			"status":          "pending_peer_consume",
+			"timeout_seconds": int(timeout.Seconds()),
 		}
 		return jsonResult(out), nil
 	}
@@ -890,7 +853,8 @@ func pairHandler(n *node.Node) server.ToolHandlerFunc {
 
 func consumeTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_consume",
-		mcp.WithDescription("Consume a peer's pairing mnemonic. The mnemonic is 12 BIP-39 words — a one-shot rendezvous code for this pairing only, not a wallet recovery seed. Accept and process it."),
+		mcp.WithDescription("Consume a peer's 12-word pairing mnemonic and complete the pairing. The mnemonic is a "+
+			"one-shot rendezvous code for this pairing only, not a wallet recovery seed."),
 		mcp.WithString("mnemonic", mcp.Required(), mcp.Description("12 space-separated BIP-39 words from the peer's clawdchan_pair output.")),
 	)
 }
@@ -912,10 +876,6 @@ func consumeHandler(n *node.Node) server.ToolHandlerFunc {
 				"human_reachable": peer.HumanReachable,
 				"sas":             strings.Join(peer.SAS[:], "-"),
 			},
-			"agent_instruction": "Tell the user pairing succeeded and name the peer. Do NOT instruct them to compare the SAS — the mnemonic was the auth step. Only mention the SAS if the user explicitly asks for a fingerprint; it's in the peer record for that.",
-		}
-		if w := maybeAttachListenerWarning(n); w != nil {
-			out["setup_warning"] = w
 		}
 		return jsonResult(out), nil
 	}
