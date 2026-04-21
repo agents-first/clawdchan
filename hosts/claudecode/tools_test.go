@@ -5,6 +5,7 @@ import (
 
 	"github.com/vMaroon/ClawdChan/core/envelope"
 	"github.com/vMaroon/ClawdChan/core/identity"
+	"github.com/vMaroon/ClawdChan/hosts"
 )
 
 // TestPendingAsks verifies the ask_human enforcement invariant: a remote
@@ -32,7 +33,7 @@ func TestPendingAsks(t *testing.T) {
 	chatter := mkEnv(2, peer, envelope.RoleAgent, envelope.IntentSay, "chitchat", 200)
 
 	t.Run("unanswered ask_human is pending", func(t *testing.T) {
-		idx := pendingAsks([]envelope.Envelope{ask, chatter}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask, chatter}, me)
 		if !idx[ask.EnvelopeID] {
 			t.Fatalf("unanswered ask_human not flagged as pending")
 		}
@@ -43,7 +44,7 @@ func TestPendingAsks(t *testing.T) {
 
 	t.Run("ask_human answered by local human is not pending", func(t *testing.T) {
 		reply := mkEnv(3, me, envelope.RoleHuman, envelope.IntentSay, "my answer", 300)
-		idx := pendingAsks([]envelope.Envelope{ask, reply}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask, reply}, me)
 		if len(idx) != 0 {
 			t.Fatalf("answered ask_human still flagged; idx=%v", idx)
 		}
@@ -51,7 +52,7 @@ func TestPendingAsks(t *testing.T) {
 
 	t.Run("agent-role reply does not close the ask", func(t *testing.T) {
 		sneaky := mkEnv(4, me, envelope.RoleAgent, envelope.IntentSay, "i'll answer for them", 300)
-		idx := pendingAsks([]envelope.Envelope{ask, sneaky}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask, sneaky}, me)
 		if !idx[ask.EnvelopeID] {
 			t.Fatalf("agent-role reply unexpectedly closed the ask; idx=%v", idx)
 		}
@@ -59,7 +60,7 @@ func TestPendingAsks(t *testing.T) {
 
 	t.Run("locally-originated ask_human is not pending", func(t *testing.T) {
 		myAsk := mkEnv(5, me, envelope.RoleAgent, envelope.IntentAskHuman, "for peer", 100)
-		idx := pendingAsks([]envelope.Envelope{myAsk}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{myAsk}, me)
 		if len(idx) != 0 {
 			t.Fatalf("our own outgoing ask_human flagged as pending: %v", idx)
 		}
@@ -91,7 +92,7 @@ func TestSerializeEnvelopeDirection(t *testing.T) {
 		Content:     envelope.Content{Kind: envelope.ContentDigest, Title: "clawdchan:collab_sync", Body: "live"},
 	}
 
-	in := serializeEnvelope(plain, me, false)
+	in := hosts.SerializeEnvelope(plain, me, false)
 	if in["direction"] != "in" || in["collab"] != false {
 		t.Fatalf("plain peer envelope: direction=%v collab=%v", in["direction"], in["collab"])
 	}
@@ -99,12 +100,12 @@ func TestSerializeEnvelopeDirection(t *testing.T) {
 		t.Fatalf("full render should include content, got %v", in["content"])
 	}
 
-	out := serializeEnvelope(collab, me, false)
+	out := hosts.SerializeEnvelope(collab, me, false)
 	if out["direction"] != "out" || out["collab"] != true {
 		t.Fatalf("self collab envelope: direction=%v collab=%v", out["direction"], out["collab"])
 	}
 
-	hdr := serializeEnvelope(plain, me, true)
+	hdr := hosts.SerializeEnvelope(plain, me, true)
 	if _, has := hdr["content"]; has {
 		t.Fatalf("headers mode should omit content, got %v", hdr["content"])
 	}
@@ -137,7 +138,7 @@ func TestOpenAskHumanDetection(t *testing.T) {
 	ask := mk(peer, envelope.RoleAgent, envelope.IntentAskHuman, 1, 100)
 
 	t.Run("open ask shows as pending", func(t *testing.T) {
-		idx := pendingAsks([]envelope.Envelope{ask}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask}, me)
 		if !idx[ask.EnvelopeID] {
 			t.Fatalf("open ask_human not flagged as pending")
 		}
@@ -145,7 +146,7 @@ func TestOpenAskHumanDetection(t *testing.T) {
 
 	t.Run("human reply closes the ask", func(t *testing.T) {
 		reply := mk(me, envelope.RoleHuman, envelope.IntentSay, 2, 200)
-		idx := pendingAsks([]envelope.Envelope{ask, reply}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask, reply}, me)
 		if len(idx) != 0 {
 			t.Fatalf("answered ask still pending: %v", idx)
 		}
@@ -153,7 +154,7 @@ func TestOpenAskHumanDetection(t *testing.T) {
 
 	t.Run("agent-role send does not close the ask", func(t *testing.T) {
 		sneaky := mk(me, envelope.RoleAgent, envelope.IntentSay, 3, 200)
-		idx := pendingAsks([]envelope.Envelope{ask, sneaky}, me)
+		idx := hosts.PendingAsks([]envelope.Envelope{ask, sneaky}, me)
 		if !idx[ask.EnvelopeID] {
 			t.Fatalf("agent-role send unexpectedly closed the ask — this would defeat the pending_ask_hint safety")
 		}
@@ -181,19 +182,19 @@ func TestParseMessageIntent(t *testing.T) {
 		{"garbage", 0, true},
 	}
 	for _, c := range cases {
-		got, err := parseMessageIntent(c.in)
+		got, err := hosts.ParseMessageIntent(c.in)
 		if c.err {
 			if err == nil {
-				t.Errorf("parseMessageIntent(%q): want error, got %v", c.in, got)
+				t.Errorf("ParseMessageIntent(%q): want error, got %v", c.in, got)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("parseMessageIntent(%q): unexpected error: %v", c.in, err)
+			t.Errorf("ParseMessageIntent(%q): unexpected error: %v", c.in, err)
 			continue
 		}
 		if got != c.want {
-			t.Errorf("parseMessageIntent(%q) = %v, want %v", c.in, got, c.want)
+			t.Errorf("ParseMessageIntent(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
