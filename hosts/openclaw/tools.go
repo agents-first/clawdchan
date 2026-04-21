@@ -27,12 +27,8 @@ type ToolHandler func(ctx context.Context, params map[string]any) (string, error
 // Unlike the Claude Code MCP host (stdio JSON-RPC), the OpenClaw host
 // receives tool invocations as structured JSON over the Gateway Protocol
 // and dispatches them via Bridge.RegisterTool.
-func RegisterTools(br *Bridge, n *node.Node, opts ...Option) {
-	cfg := regOpts{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	br.RegisterTool("clawdchan_toolkit", toolkitHandler(n, &cfg))
+func RegisterTools(br *Bridge, n *node.Node) {
+	br.RegisterTool("clawdchan_toolkit", toolkitHandler(n))
 	br.RegisterTool("clawdchan_whoami", whoamiHandler(n))
 	br.RegisterTool("clawdchan_peers", peersHandler(n))
 	br.RegisterTool("clawdchan_pair", pairHandler(n))
@@ -47,41 +43,12 @@ func RegisterTools(br *Bridge, n *node.Node, opts ...Option) {
 	br.RegisterTool("clawdchan_peer_remove", peerRemoveHandler(n))
 }
 
-// Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
-// it's a variadic slot now so callers don't break when we add more.
-type Option func(*regOpts)
-
-type regOpts struct {
-	dispatchEnabled bool
-}
-
-// WithDispatchEnabled tells the toolkit to report that the local daemon
-// has agent-dispatch configured. The MCP binary reads this from the same
-// config.json the daemon reads. When enabled, incoming collab=true asks
-// will be auto-answered by the configured subprocess — the agent can set
-// its expectations about conversation cadence accordingly, and knows
-// that some outbound envelopes it finds in its own inbox may have been
-// dispatcher-produced rather than sent by this session's agent.
-func WithDispatchEnabled(enabled bool) Option {
-	return func(o *regOpts) { o.dispatchEnabled = enabled }
-}
-
 // --- toolkit ----------------------------------------------------------------
 
-func toolkitHandler(n *node.Node, opts *regOpts) ToolHandler {
+func toolkitHandler(n *node.Node) ToolHandler {
 	return func(ctx context.Context, _ map[string]any) (string, error) {
 		id := n.Identity()
 		setup := buildSetupStatus(n)
-
-		// Dispatch awareness. When the local daemon has agent-dispatch
-		// configured, inbound collab=true asks are auto-answered by a
-		// subprocess rather than waiting for the human — and that fact
-		// shapes how the agent should describe cadence and attribute
-		// outbound envelopes it didn't itself send this session.
-		dispatch := map[string]any{"enabled": opts != nil && opts.dispatchEnabled}
-		if opts != nil && opts.dispatchEnabled {
-			dispatch["note"] = "Incoming collab=true asks are auto-answered at agent speed by a local subprocess. If you see direction=out collab=true envelopes in a thread that you don't remember sending this session, your dispatcher handled them while the user was away — describe them that way, not as something you said."
-		}
 
 		return jsonResult(map[string]any{
 			"version": "0.4",
@@ -90,8 +57,7 @@ func toolkitHandler(n *node.Node, opts *regOpts) ToolHandler {
 				"alias":   n.Alias(),
 				"relay":   n.RelayURL(),
 			},
-			"setup":    setup,
-			"dispatch": dispatch,
+			"setup": setup,
 			"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
 				"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 			"intents": []map[string]string{
@@ -384,7 +350,7 @@ func inboxNotes(hasPending, hasCollab bool) []string {
 		notes = append(notes, "pending_asks carry the peer's ask_human verbatim. Present to the user, then clawdchan_reply with their literal words or clawdchan_decline. Do not compose an answer yourself.")
 	}
 	if hasCollab {
-		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting. If their side has no dispatcher, ask the user whether to engage live or reply at their own pace.")
+		notes = append(notes, "Envelopes with collab=true are part of a live agent-to-agent exchange. If direction='in' and you didn't initiate, the peer has a sub-agent waiting — ask the user whether to engage live (spawn a Task sub-agent) or reply at their own pace.")
 	}
 	return notes
 }

@@ -309,21 +309,14 @@ Three feasibility caveats worth being explicit about:
    Async-wakeup use cases that cross devices route through OpenClaw, whose
    gateway reaches WhatsApp/Signal/iMessage.
 
-   **Agent-cadence collab (optional).** When the sender wraps an `ask` in
-   the reserved `Content.Title="clawdchan:collab_sync"` marker (the
-   `collab=true` flag on `clawdchan_message`), the receiver's daemon can
-   take an alternate path: if the user has configured
-   `agent_dispatch.command` in `~/.clawdchan/config.json`, the daemon
-   spawns that subprocess with the ask + thread context on stdin and
-   routes the subprocess's JSON answer back as a normal envelope — all
-   without the human's next CC turn. Subprocess is chosen over in-process
-   linking to keep the daemon host-agnostic (no `hosts/` imports in
-   `core/`) and crash-isolated. The wire format doesn't change — no new
-   envelope field, no signing-form shift. See `core/policy/dispatch.go`
-   for the contract and `docs/mcp.md` for the user-facing config. This
-   collapses the cross-device async wakeup for the common case of two
-   CC-on-laptop users into a same-box loop, without replacing the
-   OpenClaw gateway path for genuinely-offline counterparts.
+   **Live-collab marker.** When the sender wraps an `ask` in the reserved
+   `Content.Title="clawdchan:collab_sync"` marker (the `collab=true` flag
+   on `clawdchan_message`), the receiver differentiates the notification
+   copy ("X is collabing live") and the in-session suppression policy.
+   The marker is a sender→receiver hint — it does not change the wire
+   format or the signing form. An agent-cadence subprocess path that
+   would answer these asks automatically is a future extension, not part
+   of v0.
 
 2. **No forward secrecy in v0.** The session key is a deterministic function
    of both nodes' long-term X25519 keys. Leaking a long-term key

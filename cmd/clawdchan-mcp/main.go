@@ -35,16 +35,6 @@ type config struct {
 	DataDir  string `json:"data_dir"`
 	RelayURL string `json:"relay_url"`
 	Alias    string `json:"alias"`
-	// Dispatch is the daemon's agent-cadence collab config. The MCP
-	// server only reads the enabled bit — if set, it passes the flag to
-	// the tool surface so the toolkit can tell the agent "collab asks
-	// will be auto-answered by your daemon." The subprocess command
-	// itself is consumed only by the daemon.
-	Dispatch *dispatchConfig `json:"agent_dispatch,omitempty"`
-}
-
-type dispatchConfig struct {
-	Enabled bool `json:"enabled,omitempty"`
 }
 
 const version = "0.2.0"
@@ -99,8 +89,7 @@ func main() {
 	}()
 
 	s := server.NewMCPServer("clawdchan", version)
-	dispatchEnabled := cfg.Dispatch != nil && cfg.Dispatch.Enabled
-	claudecode.RegisterTools(s, n, claudecode.WithDispatchEnabled(dispatchEnabled))
+	claudecode.RegisterTools(s, n)
 
 	unregister, regErr := listenerreg.Register(
 		cfg.DataDir, listenerreg.KindMCP,
