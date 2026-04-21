@@ -17,6 +17,19 @@ import (
 
 func cmdListen(args []string) error {
 	fs := flag.NewFlagSet("listen", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: clawdchan listen [flags]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Foreground inspector: hold the relay link in this terminal and print")
+		fmt.Fprintln(os.Stderr, "envelopes to stdout as they arrive. Useful for debugging.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "For persistent background listening with OS notifications across Claude")
+		fmt.Fprintln(os.Stderr, "Code sessions, use `clawdchan daemon install` instead — it registers a")
+		fmt.Fprintln(os.Stderr, "LaunchAgent / systemd user unit / Scheduled Task that auto-starts at login.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
 	follow := fs.Bool("follow", true, "follow all threads; print new envelopes to stdout")
 	tail := fs.Int("tail", -1, "replay only the last N envelopes per thread before live traffic. -1 = all history, 0 = no replay")
 	fs.Parse(args)
