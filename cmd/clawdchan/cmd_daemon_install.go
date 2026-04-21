@@ -30,8 +30,9 @@ const windowsTaskName = "ClawdChan Daemon"
 // daemonSetup is the friendly entry point called by `make install`: it
 // explains what the daemon is, where it gets installed, and prompts the user
 // before doing anything. Skipped cleanly when ClawdChan isn't initialized
-// yet, when the daemon is already installed, or when stdin isn't a TTY (so
-// unattended `make install` doesn't silently register a system service).
+// yet, or when stdin isn't a TTY (so unattended `make install` doesn't
+// silently register a system service). If already installed, setup offers a
+// reinstall and otherwise starts the existing service immediately.
 func daemonSetup(args []string) error {
 	fs := flag.NewFlagSet("daemon setup", flag.ExitOnError)
 	yes := fs.Bool("y", false, "assume yes (non-interactive)")
@@ -50,7 +51,8 @@ func daemonSetup(args []string) error {
 				return daemonInstall([]string{"-force"})
 			}
 		}
-		return nil
+		fmt.Println("  Starting the installed daemon now.")
+		return daemonStartInstalled()
 	}
 
 	fmt.Println("  Holds a persistent relay link so peers can reach you when no")
@@ -150,6 +152,44 @@ func daemonInstall(args []string) error {
 		return installSystemd(bin, *force)
 	case "windows":
 		return installWindowsTask(bin, *force)
+	default:
+		return fmt.Errorf("daemon install not supported on %s — run `clawdchan daemon run` in a terminal", runtime.GOOS)
+	}
+}
+
+// daemonStartInstalled starts an already-installed daemon service without
+// rewriting service files or firing a fresh test notification.
+func daemonStartInstalled() error {
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		plistPath := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
+		domain := "gui/" + strconv.Itoa(os.Getuid())
+		_ = exec.Command("launchctl", "bootout", domain, plistPath).Run()
+		if out, err := exec.Command("launchctl", "bootstrap", domain, plistPath).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl bootstrap: %w: %s", err, string(out))
+		}
+		fmt.Printf("daemon started, logs at %s\n", filepath.Join(home, "Library", "Logs", "clawdchan-daemon.log"))
+		return nil
+	case "linux":
+		if out, err := exec.Command("systemctl", "--user", "enable", "--now", systemdUnit).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl enable --now: %w: %s", err, string(out))
+		}
+		fmt.Println("daemon started and enabled for auto-start at login.")
+		return nil
+	case "windows":
+		// Keep the notifier AppID registered before starting so toasts keep working.
+		if err := registerWindowsAppID(); err != nil {
+			fmt.Printf("note: AUMID registration failed (%v); toasts will fall back to defaults\n", err)
+		}
+		if err := restartWindowsTask(); err != nil {
+			return err
+		}
+		fmt.Println("daemon restarted. It will auto-start at each logon.")
+		return nil
 	default:
 		return fmt.Errorf("daemon install not supported on %s — run `clawdchan daemon run` in a terminal", runtime.GOOS)
 	}
@@ -278,12 +318,23 @@ func installWindowsTask(bin string, force bool) error {
 		fmt.Printf("created scheduled task %q\n", windowsTaskName)
 	}
 
+	if err := restartWindowsTask(); err != nil {
+		return err
+	}
+	fmt.Println("daemon restarted. It will auto-start at each logon.")
+
+	verifyTestNotification()
+	return nil
+}
+
+// restartWindowsTask ensures the scheduled-task daemon process is replaced.
+// /End is best-effort (it fails when no instance is running), then /Run starts
+// a fresh instance.
+func restartWindowsTask() error {
+	_, _ = exec.Command("schtasks", "/End", "/TN", windowsTaskName).CombinedOutput()
 	if out, err := exec.Command("schtasks", "/Run", "/TN", windowsTaskName).CombinedOutput(); err != nil {
 		return fmt.Errorf("schtasks /Run: %w: %s", err, string(out))
 	}
-	fmt.Println("daemon started. It will auto-start at each logon.")
-
-	verifyTestNotification()
 	return nil
 }
 
