@@ -41,6 +41,13 @@ import (
 // something lands. Notification copy is a prompt to the user — "Alice's agent
 // replied, ask me to continue" — that teaches the async UX.
 func cmdDaemon(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "-h", "--help", "help":
+			printDaemonUsage(os.Stdout)
+			return nil
+		}
+	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return daemonRun(args)
 	}
@@ -58,8 +65,29 @@ func cmdDaemon(args []string) error {
 	case "status":
 		return daemonStatus(rest)
 	default:
-		return fmt.Errorf("unknown daemon subcommand %q (use run|setup|install|uninstall|status)", sub)
+		printDaemonUsage(os.Stderr)
+		return fmt.Errorf("unknown daemon subcommand %q", sub)
 	}
+}
+
+// printDaemonUsage writes an overview of the daemon subcommands so users
+// running `clawdchan daemon -h` get a discoverable surface instead of a
+// foreground run or a terse flag dump.
+func printDaemonUsage(w *os.File) {
+	fmt.Fprintln(w, "Usage: clawdchan daemon <subcommand> [flags]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "The daemon holds the relay link across Claude Code sessions and fires OS")
+	fmt.Fprintln(w, "notifications on inbound. Most users run `install` once and never touch the rest.")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  install       register as a LaunchAgent / systemd unit / Scheduled Task; auto-start at login")
+	fmt.Fprintln(w, "  setup         install interactively (explain, prompt, then install)")
+	fmt.Fprintln(w, "  uninstall     stop the service and remove its unit file")
+	fmt.Fprintln(w, "  status        report install state, running pid, and (with -v) recent log lines")
+	fmt.Fprintln(w, "  run           foreground run (what the service unit invokes; rarely run by hand)")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "With no subcommand, `clawdchan daemon` runs in the foreground — convenient for")
+	fmt.Fprintln(w, "development, but `install` is what you want for day-to-day use.")
 }
 
 // --- run --------------------------------------------------------------------

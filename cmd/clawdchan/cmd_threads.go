@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -42,12 +43,23 @@ func cmdThreads(_ []string) error {
 
 func cmdOpen(args []string) error {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: clawdchan open <peer-hex> [-topic T]")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Open a new thread with a paired peer and print its 32-char thread id.")
+		fmt.Fprintln(os.Stderr, "Most users never need this — the MCP surface resolves threads automatically")
+		fmt.Fprintln(os.Stderr, "per peer. Useful for scripting or for the `send` / `inspect` CLI commands.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Flags:")
+		fs.PrintDefaults()
+	}
 	topic := fs.String("topic", "", "thread topic")
 	fs.Parse(args)
 
 	rest := fs.Args()
 	if len(rest) < 1 {
-		return errors.New("usage: clawdchan open <peer-hex> [-topic T]")
+		fs.Usage()
+		return errors.New("missing peer-hex")
 	}
 	peerID, err := parseNodeID(rest[0])
 	if err != nil {
@@ -73,10 +85,21 @@ func cmdOpen(args []string) error {
 }
 
 func cmdSend(args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: clawdchan send <thread-hex-or-prefix> <text...>")
+	fs := flag.NewFlagSet("send", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: clawdchan send <thread-hex-or-prefix> <text...>")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Send a plain-text envelope on an existing thread (intent=say).")
+		fmt.Fprintln(os.Stderr, "For richer sends (intents, collab flag) use the MCP `clawdchan_message`")
+		fmt.Fprintln(os.Stderr, "tool from Claude Code — this CLI is for scripting and debugging.")
 	}
-	text := strings.Join(args[1:], " ")
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) < 2 {
+		fs.Usage()
+		return errors.New("need thread id/prefix and text")
+	}
+	text := strings.Join(rest[1:], " ")
 
 	c, err := loadConfig()
 	if err != nil {
@@ -88,7 +111,7 @@ func cmdSend(args []string) error {
 	}
 	defer n.Close()
 
-	threadID, err := resolveThread(context.Background(), n, args[0])
+	threadID, err := resolveThread(context.Background(), n, rest[0])
 	if err != nil {
 		return err
 	}
@@ -107,8 +130,18 @@ func cmdSend(args []string) error {
 }
 
 func cmdInspect(args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: clawdchan inspect <thread-hex-or-prefix>")
+	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: clawdchan inspect <thread-hex-or-prefix>")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Print every envelope on a thread, oldest first. Debugging aid — the MCP")
+		fmt.Fprintln(os.Stderr, "`clawdchan_inbox` tool is the normal path for an agent to read state.")
+	}
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) < 1 {
+		fs.Usage()
+		return errors.New("missing thread id/prefix")
 	}
 	c, err := loadConfig()
 	if err != nil {
@@ -119,7 +152,7 @@ func cmdInspect(args []string) error {
 		return err
 	}
 	defer n.Close()
-	threadID, err := resolveThread(context.Background(), n, args[0])
+	threadID, err := resolveThread(context.Background(), n, rest[0])
 	if err != nil {
 		return err
 	}

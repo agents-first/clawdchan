@@ -123,22 +123,24 @@ Usage:
   clawdchan <command> [args]
 
 Commands:
-  setup     One-command onboarding: init + PATH + daemon (interactive)
-  init      Create config and identity (non-interactive)
-  whoami    Print this node's id and alias
-  pair      Generate a pairing code and wait for the peer
-  consume   Enter a peer's pairing code
-  peers     List paired peers
-  peer      Manage one peer: show | rename | revoke | remove
-  threads   List conversation threads
-  open      Open a new thread with a peer
-  send      Send a message on a thread
-  listen      Stay connected and tail traffic to stdout (terminal UX)
-  daemon      Background listener: fires OS notifications on inbound
-              Subcommands: run | setup | install | uninstall | status
+  setup       One-command onboarding: init + PATH + daemon (interactive)
+  init        Create config and identity (non-interactive)
+  whoami      Print this node's id and alias
+  pair        Generate a pairing code and wait for the peer (terminal fallback; CC is primary)
+  consume     Enter a peer's pairing code (terminal fallback; CC is primary)
+  peers       List paired peers
+  peer        Manage one peer: show | rename | revoke | remove
+  threads     List conversation threads
+  open        Open a new thread with a peer (scripting aid)
+  send        Send a plain-text message on a thread (scripting aid)
+  listen      Foreground inspector — prints traffic to stdout (use 'daemon install' for persistence)
+  daemon      Persistent background listener with OS notifications
+              Subcommands: install | setup | uninstall | status | run
   path-setup  Put $GOPATH/bin on your shell PATH (zsh/bash/fish)
-  inspect     Print envelopes on a thread
-  doctor    Diagnose install, config, and relay connectivity
+  inspect     Print envelopes on a thread (debugging)
+  doctor      Diagnose install, config, and relay connectivity
+
+Run 'clawdchan <command> -h' for per-command help.
 
 Config lives at $CLAWDCHAN_HOME or ~/.clawdchan.
 
@@ -156,7 +158,7 @@ func loadConfig() (config, error) {
 	}
 	var c config
 	if err := json.Unmarshal(data, &c); err != nil {
-		return config{}, fmt.Errorf("parse config: %w", err)
+		return config{}, fmt.Errorf("parse config: %w (run `clawdchan doctor` for diagnostics)", err)
 	}
 	if c.DataDir == "" {
 		c.DataDir = dir

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -13,6 +15,27 @@ import (
 	"github.com/agents-first/ClawdChan/core/node"
 	"github.com/agents-first/ClawdChan/core/pairing"
 )
+
+// printPeerUsage writes the subcommand overview to w so `clawdchan peer`
+// with no args / -h can emit discovery help on stdout (exit 0) rather than
+// a bare error on stderr.
+func printPeerUsage(w io.Writer) {
+	fmt.Fprintln(w, "Usage: clawdchan peer <subcommand> <ref> [args]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Manage a single paired peer. <ref> accepts:")
+	fmt.Fprintln(w, "  - a full 64-char hex node id")
+	fmt.Fprintln(w, "  - a unique hex prefix (>= 4 chars)")
+	fmt.Fprintln(w, "  - an exact alias (case-insensitive)")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  show   <ref>                  print peer details")
+	fmt.Fprintln(w, "  rename <ref> <new-alias>      change the local display alias")
+	fmt.Fprintln(w, "  revoke <ref>                  mark trust=revoked; drop future inbound; keep history")
+	fmt.Fprintln(w, "  remove [-y] <ref> [ref...]    hard-delete peer, threads, envelopes, outbox")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "The agent surface exposes `clawdchan_peer_rename` only — revoke and remove")
+	fmt.Fprintln(w, "are CLI-only so destructive verbs stay in human hands.")
+}
 
 // cmdPeer dispatches peer-management subcommands:
 //
@@ -26,8 +49,9 @@ import (
 //   - unique hex prefix (≥ 4 chars)
 //   - exact alias match (case-insensitive)
 func cmdPeer(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: clawdchan peer <show|rename|revoke|remove> <ref> [args]")
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		printPeerUsage(os.Stdout)
+		return nil
 	}
 	sub := args[0]
 	rest := args[1:]
