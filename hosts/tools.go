@@ -365,7 +365,7 @@ func BuildToolkitBase(n *node.Node, setup map[string]any) map[string]any {
 			"alias":   n.Alias(),
 			"relay":   n.RelayURL(),
 		},
-		"setup":    setup,
+		"setup": setup,
 		"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
 			"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 		"intents": []map[string]string{
