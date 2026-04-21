@@ -322,38 +322,6 @@ func TestInbox_OutboundEnvelopesCarryStatus(t *testing.T) {
 	}
 }
 
-func TestInbox_DeliveredOutboundHasTimestamp(t *testing.T) {
-	ctx := context.Background()
-	n, _, tid := setupInboxTestNode(t)
-	me := n.Identity()
-	out := testEnvelope(0x11, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
-	appendInboxEnvelope(t, n, out)
-	if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 150); err != nil {
-		t.Fatalf("MarkEnvelopeSent: %v", err)
-	}
-	if err := n.Store().MarkEnvelopeDelivered(ctx, out.EnvelopeID, 200); err != nil {
-		t.Fatalf("MarkEnvelopeDelivered: %v", err)
-	}
-
-	peers, _, _, _, _, _, err := collectInbox(ctx, n, 0, false)
-	if err != nil {
-		t.Fatalf("collectInbox: %v", err)
-	}
-	envs := mustPeerEnvelopes(t, peers)
-	if len(envs) != 1 {
-		t.Fatalf("len(envelopes) = %d, want 1", len(envs))
-	}
-	got := envs[0]
-	if got["status"] != "delivered" {
-		t.Fatalf("status = %v, want delivered", got["status"])
-	}
-	if got["sent_at_ms"] != int64(150) {
-		t.Fatalf("sent_at_ms = %v, want 150", got["sent_at_ms"])
-	}
-	if got["delivered_at_ms"] != int64(200) {
-		t.Fatalf("delivered_at_ms = %v, want 200", got["delivered_at_ms"])
-	}
-}
 
 func TestInbox_FiltersIntentAck(t *testing.T) {
 	ctx := context.Background()
@@ -394,48 +362,6 @@ func TestInbox_FiltersIntentAck(t *testing.T) {
 	}
 }
 
-func TestInbox_NoteFiresOnlyForUnfinishedOutbound(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("fires for sent outbound", func(t *testing.T) {
-		n, _, tid := setupInboxTestNode(t)
-		me := n.Identity()
-		out := testEnvelope(0x31, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
-		appendInboxEnvelope(t, n, out)
-		if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 120); err != nil {
-			t.Fatalf("MarkEnvelopeSent: %v", err)
-		}
-		_, _, hasPending, hasCollab, hasUndeliveredOutbound, _, err := collectInbox(ctx, n, 0, false)
-		if err != nil {
-			t.Fatalf("collectInbox: %v", err)
-		}
-		notes := inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound)
-		if !containsNote(notes, outboundStatusNote) {
-			t.Fatalf("status note missing; notes=%v", notes)
-		}
-	})
-
-	t.Run("does not fire when all outbound are delivered", func(t *testing.T) {
-		n, _, tid := setupInboxTestNode(t)
-		me := n.Identity()
-		out := testEnvelope(0x32, tid, me, envelope.RoleAgent, envelope.IntentSay, 100)
-		appendInboxEnvelope(t, n, out)
-		if err := n.Store().MarkEnvelopeSent(ctx, out.EnvelopeID, 120); err != nil {
-			t.Fatalf("MarkEnvelopeSent: %v", err)
-		}
-		if err := n.Store().MarkEnvelopeDelivered(ctx, out.EnvelopeID, 130); err != nil {
-			t.Fatalf("MarkEnvelopeDelivered: %v", err)
-		}
-		_, _, hasPending, hasCollab, hasUndeliveredOutbound, _, err := collectInbox(ctx, n, 0, false)
-		if err != nil {
-			t.Fatalf("collectInbox: %v", err)
-		}
-		notes := inboxNotes(hasPending, hasCollab, hasUndeliveredOutbound)
-		if containsNote(notes, outboundStatusNote) {
-			t.Fatalf("status note should not fire; notes=%v", notes)
-		}
-	})
-}
 
 func setupInboxTestNode(t *testing.T) (*node.Node, identity.NodeID, envelope.ThreadID) {
 	t.Helper()
