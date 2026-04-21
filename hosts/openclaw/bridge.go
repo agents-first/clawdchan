@@ -98,14 +98,15 @@ type Bridge struct {
 	writeMu sync.Mutex
 	nextID  uint64
 
-	mu            sync.Mutex
-	conn          *websocket.Conn
-	connReady     chan struct{}
-	started       bool
-	closed        bool
-	pending       map[string]chan gatewayMessage
-	subscriptions map[string]*subscription
-
+	mu               sync.Mutex
+	conn             *websocket.Conn
+	connReady        chan struct{}
+	started          bool
+	closed           bool
+	pending          map[string]chan gatewayMessage
+	subscriptions    map[string]*subscription
+	toolMu           sync.RWMutex
+	tools            map[string]ToolHandler
 	reconnectBackoff []time.Duration
 }
 
@@ -134,7 +135,28 @@ func NewBridge(wsURL, token, deviceID string, deviceKey ed25519.PrivateKey) *Bri
 		pending:          make(map[string]chan gatewayMessage),
 		subscriptions:    make(map[string]*subscription),
 		reconnectBackoff: append([]time.Duration(nil), defaultReconnectBackoff...),
+		tools:            make(map[string]ToolHandler),
 	}
+}
+
+// RegisterTool registers a ClawdChan tool handler by name. Calls to
+// DispatchTool with the matching name will be routed to the handler.
+func (b *Bridge) RegisterTool(name string, h ToolHandler) {
+	b.toolMu.Lock()
+	b.tools[name] = h
+	b.toolMu.Unlock()
+}
+
+// DispatchTool looks up a registered tool by name and calls it with the
+// provided params. Returns the JSON result string or an error.
+func (b *Bridge) DispatchTool(ctx context.Context, name string, params map[string]any) (string, error) {
+	b.toolMu.RLock()
+	h, ok := b.tools[name]
+	b.toolMu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("clawdchan tool %q not registered", name)
+	}
+	return h(ctx, params)
 }
 
 // Connect dials the gateway and completes the initial hello/connect/hello-ok handshake.
