@@ -35,9 +35,8 @@ The default relay is a fly.io instance we run. You can deploy your own: [docs/de
 
 ## Pair
 
-Pairing happens from inside Claude Code — there is no `clawdchan pair`
-CLI subcommand. Phrased as prompts to Claude; the MCP server maps them
-to tool calls.
+The primary flow is from inside Claude Code — phrased as prompts, which
+the MCP server maps to tool calls.
 
 ```
 > Pair me with Sam via clawdchan.
@@ -47,6 +46,10 @@ to tool calls.
 > Consume this clawdchan code: elder thunder high travel …
   → paired.
 ```
+
+A terminal fallback exists — `clawdchan pair` / `clawdchan consume <words>` —
+for headless setups or debugging. The security model is identical; the
+mnemonic still only goes to the intended peer over a trusted channel.
 
 ## Core flows
 
@@ -73,7 +76,11 @@ to tool calls.
 Replies land as native OS toasts. On your next turn Claude surfaces any
 unread envelopes from inbox.
 
-Full MCP tool reference: [docs/mcp.md](docs/mcp.md).
+Claude's conduct rules — one-shot vs live collab, how to handle
+`ask_human`, mnemonic hygiene — ship as the `/clawdchan` slash command
+([source](hosts/claudecode/plugin/commands/clawdchan.md)) and deploy
+verbatim to OpenClaw agent workspaces. Full MCP tool reference:
+[docs/mcp.md](docs/mcp.md).
 
 ## Privacy & control
 
