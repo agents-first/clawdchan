@@ -8,24 +8,21 @@ import (
 	"sort"
 )
 
-// Without operator.write + operator.admin the gateway closes the subagent WS
-// with 1008 "pairing required" and no tools (including ClawdChan) are reachable.
+// Without operator.write + operator.admin the gateway closes the subagent
+// WS with 1008 "pairing required" and no tools are reachable.
 var openClawRequiredOperatorScopes = []string{
 	"operator.admin",
 	"operator.read",
 	"operator.write",
 }
 
-// ensureOpenClawOperatorScopes patches the local operator token stored by
-// OpenClaw so it carries the scopes subagents need. It touches two files:
-//
-//	~/.openclaw/identity/device-auth.json  — tokens.operator.scopes
-//	~/.openclaw/devices/paired.json        — entry[deviceId].{scopes,approvedScopes,tokens.operator.scopes}
-//
+// ensureOpenClawOperatorScopes patches the local operator token written by
+// OpenClaw (~/.openclaw/identity/device-auth.json and the matching entry in
+// ~/.openclaw/devices/paired.json) so it carries the scopes subagents need.
 // Idempotent. Returns true only if a file was rewritten — the caller uses
 // that to decide whether the gateway must be restarted. Missing files are
-// treated as "nothing to do" (user may not have paired this device yet).
-func ensureOpenClawOperatorScopes() (changed bool, err error) {
+// treated as "nothing to do" (device may not be paired yet).
+func ensureOpenClawOperatorScopes() (bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false, err
@@ -33,87 +30,60 @@ func ensureOpenClawOperatorScopes() (changed bool, err error) {
 	authPath := filepath.Join(home, ".openclaw", "identity", "device-auth.json")
 	pairedPath := filepath.Join(home, ".openclaw", "devices", "paired.json")
 
-	authData, err := os.ReadFile(authPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
+	auth, err := readJSONMap(authPath)
+	if err != nil || auth == nil {
 		return false, err
 	}
-	var auth map[string]any
-	if err := json.Unmarshal(authData, &auth); err != nil {
-		return false, fmt.Errorf("parse %s: %w", authPath, err)
-	}
-
-	authChanged := false
-	if tokens, ok := auth["tokens"].(map[string]any); ok {
-		if op, ok := tokens["operator"].(map[string]any); ok {
-			if merged, ch := mergeScopeList(op["scopes"]); ch {
-				op["scopes"] = merged
-				authChanged = true
-			}
-		}
-	}
+	authChanged := patchOperatorTokenScopes(auth)
 	if authChanged {
-		if err := writeJSONPreservingMode(authPath, auth); err != nil {
+		if err := writeJSONMap(authPath, auth); err != nil {
 			return false, err
 		}
 	}
 
 	deviceID, _ := auth["deviceId"].(string)
-
-	pairedData, err := os.ReadFile(pairedPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return authChanged, nil
-		}
+	paired, err := readJSONMap(pairedPath)
+	if err != nil || paired == nil || deviceID == "" {
 		return authChanged, err
 	}
-	var paired map[string]any
-	if err := json.Unmarshal(pairedData, &paired); err != nil {
-		return authChanged, fmt.Errorf("parse %s: %w", pairedPath, err)
+	entry, _ := paired[deviceID].(map[string]any)
+	if entry == nil {
+		return authChanged, nil
 	}
 
-	pairedChanged := false
-	if deviceID != "" {
-		if entry, ok := paired[deviceID].(map[string]any); ok {
-			pairedChanged = mergePairedEntryScopes(entry)
+	// The gateway checks scopes, approvedScopes, and tokens.operator.scopes
+	// at different handshake phases — keep all three in sync.
+	pairedChanged := patchOperatorTokenScopes(entry)
+	for _, f := range []string{"scopes", "approvedScopes"} {
+		if merged, ch := mergeScopeList(entry[f]); ch {
+			entry[f] = merged
+			pairedChanged = true
 		}
 	}
 	if pairedChanged {
-		if err := writeJSONPreservingMode(pairedPath, paired); err != nil {
+		if err := writeJSONMap(pairedPath, paired); err != nil {
 			return authChanged, err
 		}
 	}
-
 	return authChanged || pairedChanged, nil
 }
 
-// mergePairedEntryScopes keeps scopes, approvedScopes, and
-// tokens.operator.scopes in sync — the gateway checks different ones at
-// different handshake phases, so skipping one leaves the entry half-broken.
-func mergePairedEntryScopes(entry map[string]any) bool {
-	changed := false
-	for _, field := range []string{"scopes", "approvedScopes"} {
-		if merged, ch := mergeScopeList(entry[field]); ch {
-			entry[field] = merged
-			changed = true
-		}
+// patchOperatorTokenScopes updates m.tokens.operator.scopes in place.
+func patchOperatorTokenScopes(m map[string]any) bool {
+	tokens, _ := m["tokens"].(map[string]any)
+	op, _ := tokens["operator"].(map[string]any)
+	if op == nil {
+		return false
 	}
-	if tokens, ok := entry["tokens"].(map[string]any); ok {
-		if op, ok := tokens["operator"].(map[string]any); ok {
-			if merged, ch := mergeScopeList(op["scopes"]); ch {
-				op["scopes"] = merged
-				changed = true
-			}
-		}
+	merged, ch := mergeScopeList(op["scopes"])
+	if ch {
+		op["scopes"] = merged
 	}
-	return changed
+	return ch
 }
 
 // mergeScopeList returns the sorted union of existing scopes and the
-// required set. Extra scopes outside the required set (e.g. operator.pairing)
-// are preserved.
+// required set. Extras (e.g. operator.pairing) are preserved.
 func mergeScopeList(raw any) ([]any, bool) {
 	existing, _ := raw.([]any)
 	set := make(map[string]struct{}, len(existing)+len(openClawRequiredOperatorScopes))
@@ -144,9 +114,24 @@ func mergeScopeList(raw any) ([]any, bool) {
 	return out, true
 }
 
-// writeJSONPreservingMode keeps the file's existing permission bits; 0600
+func readJSONMap(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return out, nil
+}
+
+// writeJSONMap preserves the file's existing permission bits; the 0600
 // fallback is deliberate — device-auth.json carries a bearer token.
-func writeJSONPreservingMode(path string, v any) error {
+func writeJSONMap(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
