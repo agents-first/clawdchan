@@ -25,12 +25,8 @@ type ToolHandler func(ctx context.Context, params map[string]any) (string, error
 // Unlike the Claude Code MCP host (stdio JSON-RPC), the OpenClaw host
 // receives tool invocations as structured JSON over the Gateway Protocol
 // and dispatches them via Bridge.RegisterTool.
-func RegisterTools(br *Bridge, n *node.Node, opts ...Option) {
-	cfg := regOpts{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	br.RegisterTool("clawdchan_toolkit", toolkitHandler(n, &cfg))
+func RegisterTools(br *Bridge, n *node.Node) {
+	br.RegisterTool("clawdchan_toolkit", toolkitHandler(n))
 	br.RegisterTool("clawdchan_whoami", whoamiHandler(n))
 	br.RegisterTool("clawdchan_peers", peersHandler(n))
 	br.RegisterTool("clawdchan_pair", pairHandler(n))
@@ -45,27 +41,12 @@ func RegisterTools(br *Bridge, n *node.Node, opts ...Option) {
 	br.RegisterTool("clawdchan_peer_remove", peerRemoveHandler(n))
 }
 
-// Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
-// it's a variadic slot now so callers don't break when we add more.
-type Option func(*regOpts)
-
-type regOpts struct {
-	dispatchEnabled bool
-}
-
-// WithDispatchEnabled tells the toolkit to report that the local daemon
-// has agent-dispatch configured.
-func WithDispatchEnabled(enabled bool) Option {
-	return func(o *regOpts) { o.dispatchEnabled = enabled }
-}
-
 // --- toolkit ----------------------------------------------------------------
 
-func toolkitHandler(n *node.Node, opts *regOpts) ToolHandler {
+func toolkitHandler(n *node.Node) ToolHandler {
 	return func(ctx context.Context, _ map[string]any) (string, error) {
 		setup := buildSetupStatus(n)
-		dispatchEnabled := opts != nil && opts.dispatchEnabled
-		return jsonResult(hosts.BuildToolkitBase(n, setup, dispatchEnabled))
+		return jsonResult(hosts.BuildToolkitBase(n, setup))
 	}
 }
 

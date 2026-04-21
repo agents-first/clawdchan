@@ -355,14 +355,9 @@ func BuildPeersList(ctx context.Context, n *node.Node) ([]map[string]any, error)
 // --- toolkit base ------------------------------------------------------------
 
 // BuildToolkitBase builds the toolkit payload shared by all hosts. setup is
-// the host-specific listener/readiness block; dispatchEnabled controls the
-// dispatch sub-object.
-func BuildToolkitBase(n *node.Node, setup map[string]any, dispatchEnabled bool) map[string]any {
+// the host-specific listener/readiness block.
+func BuildToolkitBase(n *node.Node, setup map[string]any) map[string]any {
 	id := n.Identity()
-	dispatch := map[string]any{"enabled": dispatchEnabled}
-	if dispatchEnabled {
-		dispatch["note"] = "Incoming collab=true asks are auto-answered at agent speed by a local subprocess. If you see direction=out collab=true envelopes in a thread that you don't remember sending this session, your dispatcher handled them while the user was away — describe them that way, not as something you said."
-	}
 	return map[string]any{
 		"version": "0.4",
 		"self": map[string]any{
@@ -371,7 +366,6 @@ func BuildToolkitBase(n *node.Node, setup map[string]any, dispatchEnabled bool) 
 			"relay":   n.RelayURL(),
 		},
 		"setup":    setup,
-		"dispatch": dispatch,
 		"peer_refs": "Anywhere you need a peer_id, pass hex, a unique hex prefix (>=4), or an exact alias. " +
 			"'alice' resolves if exactly one peer carries that alias; '19466' resolves if exactly one node id starts with those chars.",
 		"intents": []map[string]string{

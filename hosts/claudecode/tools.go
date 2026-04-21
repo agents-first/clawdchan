@@ -26,16 +26,8 @@ import (
 // to" — and matches the UX the daemon enforces: toasts like "Alice's agent
 // replied — ask me about it" bring the user back to the Claude Code session,
 // where the agent resumes naturally from inbox state.
-//
-// opts tune what the toolkit tool reports back — notably whether the local
-// node has agent-dispatch configured, which the agent wants to know so it
-// can set expectations about cadence.
-func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
-	cfg := regOpts{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	s.AddTool(toolkitTool(), toolkitHandler(n, &cfg))
+func RegisterTools(s *server.MCPServer, n *node.Node) {
+	s.AddTool(toolkitTool(), toolkitHandler(n))
 	s.AddTool(peersTool(), peersHandler(n))
 	s.AddTool(pairTool(), pairHandler(n))
 	s.AddTool(consumeTool(), consumeHandler(n))
@@ -47,36 +39,21 @@ func RegisterTools(s *server.MCPServer, n *node.Node, opts ...Option) {
 	s.AddTool(peerRenameTool(), peerRenameHandler(n))
 }
 
-// Option tunes RegisterTools. The only option so far is WithDispatchEnabled;
-// it's a variadic slot now so callers don't break when we add more.
-type Option func(*regOpts)
-
-type regOpts struct {
-	dispatchEnabled bool
-}
-
-// WithDispatchEnabled tells the toolkit to report that the local daemon
-// has agent-dispatch configured.
-func WithDispatchEnabled(enabled bool) Option {
-	return func(o *regOpts) { o.dispatchEnabled = enabled }
-}
-
 // --- toolkit ----------------------------------------------------------------
 
 func toolkitTool() mcp.Tool {
 	return mcp.NewTool("clawdchan_toolkit",
-		mcp.WithDescription("Return current setup state (daemon presence, dispatch availability), peer-ref rules, "+
+		mcp.WithDescription("Return current setup state (daemon presence), peer-ref rules, "+
 			"and the intent catalog. Call once at session start. Conduct rules for using the other tools live in "+
 			"the operator manual that ships as the /clawdchan slash command and as CLAWDCHAN_GUIDE.md in OpenClaw "+
 			"workspaces — read that for behavior, use this response for current-state awareness."),
 	)
 }
 
-func toolkitHandler(n *node.Node, opts *regOpts) server.ToolHandlerFunc {
+func toolkitHandler(n *node.Node) server.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		setup := buildSetupStatus(n)
-		dispatchEnabled := opts != nil && opts.dispatchEnabled
-		return jsonResult(hosts.BuildToolkitBase(n, setup, dispatchEnabled)), nil
+		return jsonResult(hosts.BuildToolkitBase(n, setup)), nil
 	}
 }
 

@@ -41,9 +41,7 @@ See [docs/hosts.md](docs/hosts.md) for the reference walk-through using
 
 ### Policy plugin (`core/policy/` + `cmd/clawdchan/daemon_*`)
 
-Inbound gates, agent dispatchers, and daemon notification policy. The
-dispatcher subprocess contract in [core/policy/dispatch.go](core/policy/dispatch.go)
-is the stable wire — new dispatchers are new subprocesses.
+Inbound gates and daemon notification policy. Core-resident, host-agnostic.
 
 ### Intent / collab-pattern proposal (`docs/` + optionally `core/envelope/`)
 
