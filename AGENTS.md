@@ -30,12 +30,28 @@ and you **must** pause there — do not bypass prompts or run with
    clawdchan setup
    ```
 
-   This is a 5-step flow: identity, Claude Code `.mcp.json`, PATH,
-   OpenClaw gateway (optional), background daemon. Each step
-   prompts. **Tell the user to walk through it themselves** — you
-   should not pipe input into it. Steps 4 and 5 in particular have
-   choices only the user can make (whether to enable OpenClaw, whether
-   to install the daemon as a LaunchAgent / systemd unit).
+   Setup is a 5-step interactive flow: identity, Claude Code wiring,
+   PATH, OpenClaw gateway, background daemon. **Tell the user to walk
+   through it themselves** — you should not pipe input into it.
+
+   Up front the user picks which agents to wire (Claude Code /
+   OpenClaw / Both / None). Inside the Claude Code step there are two
+   scope decisions that only the user can make:
+
+   - **MCP server registration:** user-wide (recommended) writes
+     `~/.claude.json` via `claude mcp add -s user`; project writes
+     `.mcp.json` in the current directory.
+   - **`clawdchan_*` permission allow-rule:** user-wide writes
+     `~/.claude/settings.json`; project writes `.claude/settings.json`
+     (checked in, team-wide); project-local writes
+     `.claude/settings.local.json` (personal, gitignored). Skipping
+     means every MCP call prompts per-tool, which blocks live-collab
+     sub-agents.
+
+   In scripted / non-interactive runs (`-y` or no TTY), setup **does
+   not** write to `$HOME` without explicit scope flags. Pass
+   `-cc-mcp-scope=user|project` and `-cc-perm-scope=user|project|project-local`
+   to pin destinations.
 
 3. **Restart Claude Code** so the new `.mcp.json` loads the MCP
    server. The user does this — quit and reopen.
