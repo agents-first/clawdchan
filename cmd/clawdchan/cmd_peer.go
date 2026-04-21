@@ -120,7 +120,7 @@ func peerRemoveCmd(ctx context.Context, n *node.Node, args []string) error {
 	}
 	refs := fs.Args()
 	if len(refs) == 0 {
-		return errors.New("usage: clawdchan peer remove [-y] <ref>...")
+		return errors.New("usage: clawdchan peer remove [-y] <ref> [ref...]")
 	}
 	if !*yes && !stdinIsTTY() {
 		return errors.New("peer remove needs confirmation; re-run with -y on non-interactive stdin")
