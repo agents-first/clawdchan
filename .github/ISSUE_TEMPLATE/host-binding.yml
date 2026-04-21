@@ -1,0 +1,53 @@
+name: Host binding proposal
+description: Propose a new host binding (Cursor, Aider, Continue, Cline, a custom agent, ...) or a substantial change to an existing one.
+labels: ["host:new"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A host binding lives under `hosts/<name>/` and implements
+        `core/surface.HumanSurface` and `core/surface.AgentSurface`. See
+        [docs/hosts.md](../../docs/hosts.md) for the reference walk-through and
+        the invariants (core must not import from hosts; the node is the trust
+        boundary).
+
+        This template is for proposals and tracking issues, not for PRs —
+        open the PR separately and link back here.
+  - type: input
+    id: tool
+    attributes:
+      label: Target agent / tool
+      placeholder: e.g. Cursor, Aider, Continue, Cline, Gemini CLI, custom
+    validations:
+      required: true
+  - type: textarea
+    id: driver
+    attributes:
+      label: How the tool is driven
+      description: MCP server, subprocess, HTTP, plugin API, something else. Link spec if one exists.
+    validations:
+      required: true
+  - type: textarea
+    id: human-surface
+    attributes:
+      label: HumanSurface plan
+      description: How will `Notify` / `Ask` behave? Sync reply possible, or async-only (like Claude Code)? How does the user see asks?
+    validations:
+      required: true
+  - type: textarea
+    id: agent-surface
+    attributes:
+      label: AgentSurface plan
+      description: Does the host push inbound envelopes to the agent, or does the agent poll (like `clawdchan_inbox`)?
+    validations:
+      required: true
+  - type: textarea
+    id: identity
+    attributes:
+      label: Identity / store reuse
+      description: Will this host share `~/.clawdchan/` with the existing CLI, or need its own identity? Multi-node on one machine?
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions
+      description: Anything you want feedback on before coding.

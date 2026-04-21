@@ -1,0 +1,58 @@
+name: Bug report
+description: Something is broken or behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check that the issue reproduces on `main`. For anything
+        touching crypto, pairing, or the wire format, use the private security
+        advisory flow instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse --short HEAD` or the release tag.
+      placeholder: e.g. 5d2518b
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - core (identity / envelope / session / store / policy)
+        - host:claudecode
+        - host:openclaw
+        - cmd/clawdchan (CLI / daemon)
+        - cmd/clawdchan-mcp
+        - cmd/clawdchan-relay
+        - other / unsure
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Exact commands or prompts. Minimal is better.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include logs from `~/.clawdchan/logs/` if relevant. Redact identity material.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS / Go version
+      placeholder: macOS 14.5 / go1.25.1

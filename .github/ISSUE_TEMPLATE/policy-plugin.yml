@@ -1,0 +1,45 @@
+name: Policy plugin proposal
+description: Propose a new policy plugin — inbound gate, notification policy, or agent dispatcher.
+labels: ["policy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Policy lives in `core/policy/`. The two active extension points are:
+
+        - **Inbound gate** (`policy.go`) — rate-limit, allowlist, quiet hours.
+        - **Dispatcher** (`dispatch.go`) — subprocess contract that answers
+          `clawdchan:collab_sync` envelopes at agent speed. The wire contract
+          is stable; new dispatchers are just new subprocesses.
+
+        Notification policy (what fires an OS toast vs. stays silent) lives in
+        `cmd/clawdchan/daemon_notify.go`. Changes there belong in this lane
+        too.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Plugin kind
+      options:
+        - inbound gate
+        - dispatcher (agent-speed reply)
+        - notification policy (daemon toasts)
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What policy gap does this close? Concrete example beats a general argument.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contract changes
+      description: Does this need any new fields in the policy interface or dispatcher wire contract? If yes, link the exact file.
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: How does a user enable and tune this? Keep it to `~/.clawdchan/config.json` unless there is a strong reason otherwise.
