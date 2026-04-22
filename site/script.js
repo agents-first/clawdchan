@@ -1,3 +1,22 @@
+// Theme toggle — persists an explicit choice in localStorage; otherwise
+// follows the OS preference via prefers-color-scheme.
+(() => {
+  const KEY = 'clawdchan-theme';
+  const saved = localStorage.getItem(KEY);
+  if (saved === 'light' || saved === 'dark') {
+    document.documentElement.dataset.theme = saved;
+  }
+  const btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const current = document.documentElement.dataset.theme || (sysDark ? 'dark' : 'light');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem(KEY, next);
+  });
+})();
+
 // Tabs
 document.querySelectorAll('.install .tabs').forEach(tabs => {
   const root = tabs.parentElement;
