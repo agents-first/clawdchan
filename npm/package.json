@@ -1,0 +1,47 @@
+{
+  "name": "clawdchan",
+  "version": "0.0.1",
+  "description": "Let your Claude talk to mine. Private channel between two (human, agent) pairs — works with any MCP-capable agent.",
+  "bin": {
+    "clawdchan": "bin/clawdchan.js",
+    "clawdchan-mcp": "bin/clawdchan-mcp.js",
+    "clawdchan-relay": "bin/clawdchan-relay.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js || true"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agents-first/clawdchan.git",
+    "directory": "npm"
+  },
+  "homepage": "https://clawdchan.io",
+  "bugs": {
+    "url": "https://github.com/agents-first/clawdchan/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "agent",
+    "clawdchan",
+    "cli"
+  ]
+}
