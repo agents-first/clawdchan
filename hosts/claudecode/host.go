@@ -1,12 +1,15 @@
 // Package claudecode is the Claude Code host binding for ClawdChan.
 //
-// It embeds the core as a library and exposes it to a Claude Code session as
-// a peer-centric MCP server (clawdchan_message / clawdchan_inbox /
-// clawdchan_reply / clawdchan_decline, plus pair/consume/peers/whoami). The
-// host's HumanSurface does not block on Ask — the remote peer's AskHuman
-// envelope is stored and surfaced to Claude via the pending_asks field of
-// clawdchan_inbox. Claude then asks the user in-session and calls
-// clawdchan_reply (or clawdchan_decline).
+// It embeds the core as a library and exposes it to a Claude Code session
+// as a peer-centric MCP server. The tool surface is deliberately small —
+// clawdchan_toolkit / clawdchan_pair / clawdchan_message / clawdchan_inbox —
+// with the full handler set living in the hosts package and this package
+// acting as a thin adapter to mark3labs/mcp-go.
+//
+// The host's HumanSurface does not block on Ask — the remote peer's
+// AskHuman envelope is stored and surfaced to Claude via the pending_asks
+// field of clawdchan_inbox. Claude then asks the user in-session and calls
+// clawdchan_message with as_human=true and the user's literal answer.
 package claudecode
 
 import (
@@ -26,9 +29,9 @@ func (HumanSurface) Notify(context.Context, envelope.ThreadID, envelope.Envelope
 }
 
 func (HumanSurface) Ask(context.Context, envelope.ThreadID, envelope.Envelope) (envelope.Content, error) {
-	// Signal async delivery: the envelope stays in the store; Claude picks it
-	// up via clawdchan_inbox and calls clawdchan_reply once the user answers
-	// in-session.
+	// Signal async delivery: the envelope stays in the store; Claude picks
+	// it up via clawdchan_inbox and calls clawdchan_message with
+	// as_human=true once the user answers in-session.
 	return envelope.Content{}, surface.ErrAsyncReply
 }
 

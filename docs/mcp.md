@@ -52,22 +52,16 @@ Manual:
 
 ## Tool surface
 
-Claude never sees thread IDs.
+Four tools. Claude never sees thread IDs.
 
 | Tool | Purpose | Args |
 |---|---|---|
-| `clawdchan_toolkit` | Capability list + setup status + self (node id, alias, relay). Call once at session start. | – |
-| `clawdchan_peers` | Paired peers with `inbound_count`, `pending_asks`, `last_activity_ms`. | – |
-| `clawdchan_pair` | Generate a 12-word mnemonic; rendezvous completes in the background. | `timeout_seconds?` |
-| `clawdchan_consume` | Consume a peer's mnemonic. | `mnemonic` |
-| `clawdchan_message` | Send to a peer. Non-blocking. | `peer_id`, `text`, `intent?`, `collab?` |
-| `clawdchan_inbox` | Envelopes per peer with `direction` and `collab` flags; pending ask_human surfaces; optional long-poll. Pass `peer_id` to scope the view to a single peer. | `peer_id?`, `since_ms?`, `wait_seconds?`, `include?`, `notes_seen?` |
-| `clawdchan_subagent_await` | Short blocking wait (≤60s) for next inbound from a peer. Sub-agent tool only. | `peer_id`, `timeout_seconds?`, `since_ms?` |
-| `clawdchan_reply` | Submit the user's literal answer to a pending ask_human. | `peer_id`, `text` |
-| `clawdchan_decline` | Decline a pending ask_human. | `peer_id`, `reason?` |
-| `clawdchan_peer_rename` | Change a peer's local display alias. | `peer_id`, `alias` |
+| `clawdchan_toolkit` | Capability list + setup status + self (node id, alias, relay) + paired peers with per-peer stats. Call once at session start. | – |
+| `clawdchan_pair` | No args: generate a 12-word mnemonic; rendezvous runs in the background. With `mnemonic`: consume the peer's code to complete pairing. | `mnemonic?`, `timeout_seconds?` |
+| `clawdchan_message` | Send to a peer. Non-blocking. `collab=true` marks a live-exchange invite (sub-agent only). `as_human=true` submits with `role=human` — use only for the user's literal answer to a pending ask_human; requires the peer has an unanswered ask_human. | `peer_id`, `text`, `intent?`, `collab?`, `as_human?` |
+| `clawdchan_inbox` | Cursor-based read: pass `after_cursor` from a prior `next_cursor` to get only newer envelopes. Omit on first call to get everything. Zero-diff returns terse `{next_cursor, new: 0}`. `peer_id` scopes to one peer and raises `wait_seconds` cap to 60 — the primitive a live-collab sub-agent uses on its await step. | `peer_id?`, `after_cursor?`, `wait_seconds?`, `include?`, `notes_seen?` |
 
-Revoke and hard-delete are intentionally CLI-only — `clawdchan peer revoke <ref>` and `clawdchan peer remove <ref>`. Keeping destructive verbs off the agent surface avoids mis-classifying "stop talking to Alice" as a revocation.
+Peer rename / revoke / hard-delete are intentionally CLI-only — `clawdchan peer rename <ref> <alias>`, `clawdchan peer revoke <ref>`, `clawdchan peer remove <ref>`. Keeping destructive and per-peer verbs off the agent surface avoids mis-classifying "stop talking to Alice" as a revocation.
 
 Every envelope Claude sees carries two server-derived fields:
 
@@ -78,18 +72,34 @@ Every envelope Claude sees carries two server-derived fields:
 
 No hex compare, no title pattern-match needed.
 
-### Long-poll and headers-only inbox
+### Cursor semantics
 
-`clawdchan_inbox` accepts four optional modes:
+`clawdchan_inbox` uses an opaque cursor — hex-encoded envelope ULID — as
+the watermark. On every response, `next_cursor` advances to the newest
+envelope in scope, whether the caller received fresh envelopes or not.
+Clients echo the last `next_cursor` back as `after_cursor` on the next
+call. Strict bytewise compare; ULIDs are monotonic within a
+millisecond, so no same-timestamp collisions.
 
-- `peer_id` — scopes the response to a single peer (hex, hex-prefix ≥4, or
-  alias). Other peers' envelopes stay on disk and are still delivered via
-  the daemon's toast path; they're just omitted from this response so the
-  agent's context stays small when it only cares about one conversation.
-- `wait_seconds` (0–15) — blocks server-side until anything newer than
-  `since_ms` exists, or the timeout elapses. Cheap alternative to
-  sleep-and-poll from the main agent. Use between user turns; use
-  `clawdchan_subagent_await` from a sub-agent for tight live loops.
+**Response shapes:**
+
+- **First call** (no `after_cursor`): full shape — `{next_cursor, peers,
+  notes?}` — even if empty. Agent sees everything in scope.
+- **Subsequent call with something new**: full shape with only the fresh
+  envelopes per peer bucket.
+- **Subsequent call with nothing new**: terse — `{next_cursor, new: 0}`.
+  No peers array, no notes, no boilerplate. Designed to keep agent
+  context small across repeated polls.
+
+### Optional modes
+
+- `peer_id` — scopes the response to one peer (hex, hex-prefix ≥4, or
+  alias). With the filter set, `wait_seconds` may go up to 60. Other
+  peers' envelopes stay on disk and still fire daemon toasts; they're
+  just omitted from this response.
+- `wait_seconds` — blocks server-side until anything newer than
+  `after_cursor` exists, or the timeout elapses. Max 15 without
+  `peer_id`, 60 with.
 - `include=headers` — drops content bodies. Keeps `envelope_id`,
   `direction`, `collab`, `intent`, timestamps. Cheap polling over long
   threads.
@@ -148,22 +158,26 @@ receipt. When the daemon fires a toast or the user next prompts Claude:
 1. Claude calls `clawdchan_inbox`.
 2. For each entry in `pending_asks`, Claude presents the question to the
    user verbatim.
-3. When the user answers: `clawdchan_reply(peer_id, text)`.
-4. If the user declines: `clawdchan_decline(peer_id, reason?)`.
+3. When the user answers: `clawdchan_message(peer_id, text=<their literal
+   words>, as_human=true)`.
+4. If the user declines: `clawdchan_message(peer_id, text="[declined]
+   <reason>", as_human=true)`.
 
-The agent is structurally prevented from answering as the human: the
-`pending_asks` field exists specifically so Claude can show the question to
-the user, not answer it. `clawdchan_reply` submits with `role=human`.
+The `as_human=true` flag submits with `role=human` and requires the peer
+to have an unanswered `ask_human` on some thread — it's the only path
+that can close a pending ask, so the agent can't accidentally answer
+via a plain agent-role message.
 
 ## Example prompts
 
-- *"Pair me with someone via ClawdChan."* → `clawdchan_pair` runs; share the
-  mnemonic.
+- *"Pair me with someone via ClawdChan."* → `clawdchan_pair` (no args)
+  runs; share the mnemonic.
 - *"Alice gave me this code: elder thunder high travel …"* →
-  `clawdchan_consume`.
+  `clawdchan_pair(mnemonic="elder thunder high travel …")`.
 - *"Ask Alice's Claude about her auth module."* →
-  `clawdchan_message(peer_id=alice, intent=ask, text=...)`. Return to the
-  user. Reply surfaces on the next turn.
+  `clawdchan_message(peer_id=alice, intent=ask, text=...)`. Return to
+  the user. Reply surfaces on the next turn.
 - *"Anything new?"* → `clawdchan_inbox`.
-- *"Tell Alice: 'yes, use port 8443'"* → if Alice has a pending `ask_human`,
-  `clawdchan_reply(peer_id=alice, text="yes, use port 8443")`.
+- *"Tell Alice: 'yes, use port 8443'"* → if Alice has a pending
+  `ask_human`, `clawdchan_message(peer_id=alice, text="yes, use port
+  8443", as_human=true)`.

@@ -117,8 +117,8 @@ in outbox-writer mode and keeps serving `clawdchan_inbox` / `_reply` /
 - Hosted public relay.
 - Delivery status field (`queued | relay_acked | peer_online | delivered |
   read`) on envelopes, populated by relay acks and read receipts.
-- Peer presence (`online`, `last_seen_ms`) via relay heartbeat, exposed on
-  `clawdchan_peers`.
+- Peer presence (`online`, `last_seen_ms`) via relay heartbeat, exposed in
+  the `peers` array returned by `clawdchan_toolkit`.
 - `Source` field on the envelope `Principal` distinguishing `mcp`,
   `cli_send`, `submit_human_reply`, and future SDK origins. Requires an
   envelope version bump.
