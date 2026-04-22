@@ -40,10 +40,10 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(%s).Show($toast)
 `, psQuote(xmlDoc), psQuote(WindowsAppID))
 
-	// 5s ceiling: first-run PowerShell JIT can take a second or two,
-	// but anything past that is a hang (missing WinRT, corrupt profile,
-	// Defender scan). Don't block the daemon's notification loop on it.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 10s ceiling: first-run PowerShell JIT can take a few seconds,
+	// and Defender scans can add delay. We don't want to block the daemon's
+	// notification loop forever on a hang, but 5s was too aggressive.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "powershell",

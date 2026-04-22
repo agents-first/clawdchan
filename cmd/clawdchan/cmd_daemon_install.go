@@ -305,14 +305,11 @@ func installWindowsTask(bin string, force bool) error {
 		out, err := exec.Command("schtasks", args...).CombinedOutput()
 		if err != nil {
 			// If Windows denied the task creation, retry via UAC elevation.
-			// Pops a single consent dialog; all other setup stays inline.
-			if strings.Contains(string(out), "Access is denied") {
-				fmt.Println("Scheduled Task creation needs admin — a Windows UAC prompt will appear.")
-				if elevErr := elevatedSchtasksCreate(args); elevErr != nil {
-					return fmt.Errorf("schtasks /Create (elevated): %w", elevErr)
-				}
-			} else {
-				return fmt.Errorf("schtasks /Create: %w: %s", err, string(out))
+			// We no longer rely on English-only output strings like "Access is denied",
+			// instead assuming failure for ONLOGON needs elevation (common case).
+			fmt.Println("Scheduled Task creation failed/needs admin — a Windows UAC prompt will appear.")
+			if elevErr := elevatedSchtasksCreate(args); elevErr != nil {
+				return fmt.Errorf("schtasks /Create (elevated): %w (original error: %s)", elevErr, string(out))
 			}
 		}
 		fmt.Printf("created scheduled task %q\n", windowsTaskName)
@@ -429,13 +426,16 @@ func daemonUninstall(_ []string) error {
 		return nil
 	case "windows":
 		_ = exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
+		
+		// Use /Query to check if the task exists without relying on English-only error strings.
+		if exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run() != nil {
+			fmt.Println("not installed")
+			_ = unregisterWindowsAppID()
+			return nil
+		}
+		
 		out, err := exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").CombinedOutput()
 		if err != nil {
-			if strings.Contains(string(out), "does not exist") || strings.Contains(string(out), "cannot find") {
-				fmt.Println("not installed")
-				_ = unregisterWindowsAppID()
-				return nil
-			}
 			return fmt.Errorf("schtasks /Delete: %w: %s", err, string(out))
 		}
 		_ = unregisterWindowsAppID()
