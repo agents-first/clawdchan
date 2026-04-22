@@ -99,6 +99,15 @@ func cmdDoctor(args []string) error {
 	threads, _ := n.ListThreads(context.Background())
 	fmt.Printf("  [ok]  peers: %d, threads: %d\n", len(peers), len(threads))
 
+	// 8. agent wiring — one block per registered host. An agent stays
+	// silent when it reports nothing, so users who only wired CC don't
+	// see noise for Gemini / Codex / Copilot.
+	for _, a := range allAgents() {
+		for _, line := range a.doctorReport() {
+			fmt.Printf("  [ok]  %s\n", line)
+		}
+	}
+
 	if mcpErr != nil {
 		return mcpErr
 	}

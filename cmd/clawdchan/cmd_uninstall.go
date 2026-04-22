@@ -74,16 +74,20 @@ func cmdUninstall(args []string) error {
 		fmt.Printf("  (%s does not exist; skipping)\n", dataDir)
 	}
 
-	// Step 3: external cleanup hints
+	// Step 3: external cleanup hints. Each agent prints its own block
+	// (see agents.go) so adding a host is one-stop.
 	fmt.Println("[3/3] manual cleanup (files we don't own)")
 	fmt.Println()
-	fmt.Println("  If you wired Claude Code, remove its references:")
-	fmt.Println("    claude mcp remove clawdchan -s user")
-	fmt.Println("    # then drop \"mcp__clawdchan\" from permissions.allow in:")
-	fmt.Println("    #   ~/.claude/settings.json")
-	fmt.Println("    #   .claude/settings.json (any project you ran setup in)")
-	fmt.Println("    #   .claude/settings.local.json (any project you ran setup in)")
-	fmt.Println()
+	for _, a := range allAgents() {
+		hints := a.uninstallHints()
+		if len(hints) == 0 {
+			continue
+		}
+		for _, line := range hints {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
+	}
 	fmt.Println("  If you wired OpenClaw:")
 	fmt.Println("    openclaw mcp remove clawdchan")
 	fmt.Println("    # and delete CLAWDCHAN_GUIDE.md from each agent workspace")
