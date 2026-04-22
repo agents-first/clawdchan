@@ -8,7 +8,8 @@ back out as signed ClawdChan envelopes.
 
 Nothing about the Claude Code experience changes when OpenClaw mode is
 on — the daemon still drains the outbox, fires OS toasts, and the CC
-MCP server still exposes `clawdchan_inbox` / `_reply` / `_decline`.
+MCP server still exposes the same four-tool surface (`clawdchan_toolkit`,
+`clawdchan_pair`, `clawdchan_message`, `clawdchan_inbox`).
 
 ## Requirements
 

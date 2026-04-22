@@ -68,7 +68,8 @@ that:
 - `HumanSurface.Ask` returns `surface.ErrAsyncReply`. The envelope stays in
   the store and is surfaced to Claude on the user's next turn via the
   `clawdchan_inbox` tool's `pending_asks` field. Claude asks the user
-  in-session and calls `clawdchan_reply` or `clawdchan_decline`.
+  in-session and calls `clawdchan_message(..., as_human=true)` with the
+  user's literal answer (or `text="[declined] …"` to decline).
 - `AgentSurface.OnMessage` is a no-op. Claude consumes envelopes by polling
   `clawdchan_inbox`, not via callback.
 - Ambient inbound awareness (OS toasts like *"Alice's agent replied — ask
@@ -81,7 +82,7 @@ Read in this order:
 
 1. [hosts/claudecode/doc.go](../hosts/claudecode/doc.go) — one-paragraph summary.
 2. [hosts/claudecode/host.go](../hosts/claudecode/host.go) — the surface impls (44 lines).
-3. [hosts/claudecode/tools.go](../hosts/claudecode/tools.go) — the MCP tool surface (`RegisterTools` wires 13 peer-centric tools onto an `*mcp.Server`).
+3. [hosts/claudecode/tools.go](../hosts/claudecode/tools.go) — the thin adapter that wraps the shared four-tool surface (`hosts.All`) onto an `*mcp.Server`. Handlers and schemas live in `hosts/tool_*.go`.
 4. [hosts/claudecode/plugin/commands/](../hosts/claudecode/plugin/commands) — the slash-command layer users actually see.
 
 ### `hosts/openclaw/` — proactive

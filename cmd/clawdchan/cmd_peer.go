@@ -33,8 +33,8 @@ func printPeerUsage(w io.Writer) {
 	fmt.Fprintln(w, "  revoke <ref>                  mark trust=revoked; drop future inbound; keep history")
 	fmt.Fprintln(w, "  remove [-y] <ref> [ref...]    hard-delete peer, threads, envelopes, outbox")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "The agent surface exposes `clawdchan_peer_rename` only — revoke and remove")
-	fmt.Fprintln(w, "are CLI-only so destructive verbs stay in human hands.")
+	fmt.Fprintln(w, "Peer management is CLI-only — rename, revoke, and remove all live here so")
+	fmt.Fprintln(w, "destructive verbs stay in human hands, out of the agent's reach.")
 }
 
 // cmdPeer dispatches peer-management subcommands:

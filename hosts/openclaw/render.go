@@ -7,6 +7,7 @@ import (
 
 	"github.com/agents-first/ClawdChan/core/envelope"
 	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/ClawdChan/hosts"
 )
 
 func ForAgent(env envelope.Envelope, peer *store.Peer) string {
@@ -28,7 +29,7 @@ func Ask(env envelope.Envelope) string {
 }
 
 func renderEnvelope(alias string, intent envelope.Intent, content envelope.Content) string {
-	return fmt.Sprintf("[clawdchan · from %s · %s]\n%s", alias, intentName(intent), contentBody(content))
+	return fmt.Sprintf("[clawdchan · from %s · %s]\n%s", alias, hosts.IntentName(intent), contentBody(content))
 }
 
 func aliasFromEnvelope(env envelope.Envelope) string {
@@ -40,27 +41,6 @@ func aliasFromEnvelope(env envelope.Envelope) string {
 
 func shortNodeID(nodeID [32]byte) string {
 	return hex.EncodeToString(nodeID[:])[:8]
-}
-
-func intentName(intent envelope.Intent) string {
-	switch intent {
-	case envelope.IntentSay:
-		return "say"
-	case envelope.IntentAsk:
-		return "ask"
-	case envelope.IntentAskHuman:
-		return "ask_human"
-	case envelope.IntentNotifyHuman:
-		return "notify_human"
-	case envelope.IntentHandoff:
-		return "handoff"
-	case envelope.IntentAck:
-		return "ack"
-	case envelope.IntentClose:
-		return "close"
-	default:
-		return fmt.Sprintf("intent_%d", intent)
-	}
 }
 
 func contentBody(c envelope.Content) string {
