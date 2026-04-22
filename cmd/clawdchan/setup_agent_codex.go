@@ -40,21 +40,14 @@ func codexAgent() *agentWiring {
 
 func setupCodex(yes bool, scopes map[string]string) error {
 	scope := strings.ToLower(strings.TrimSpace(scopes["mcp"]))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: defaulting to user scope (pass -codex-mcp-scope=skip to opt out)")
-			scope = "user"
-		}
+	if scope == "" && (yes || !stdinIsTTY()) {
+		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Register clawdchan-mcp for Codex CLI?")
-		fmt.Println("    Codex's documented MCP config is user-scope only: ~/.codex/config.toml")
-		fmt.Println("    [1] User-wide (recommended)")
-		fmt.Println("    [2] Skip")
-		switch promptChoice("  Choice [1]: ", 1, 2) {
+		fmt.Println("    MCP (~/.codex/config.toml, user only): [1] user (recommended)  [2] skip")
+		switch promptChoice("    Choice [1]: ", 1, 2) {
 		case 2:
-			return nil
+			scope = "skip"
 		default:
 			scope = "user"
 		}
@@ -74,7 +67,7 @@ func setupCodex(yes bool, scopes map[string]string) error {
 		path := filepath.Join(home, ".codex", "config.toml")
 		return mergeCodexMCP(path, mcpBin)
 	case "skip":
-		fmt.Println("  Codex MCP registration: skipped")
+		fmt.Println("    [ok] MCP → skipped")
 		return nil
 	default:
 		return fmt.Errorf("unknown -codex-mcp-scope %q (use user|skip)", scope)
@@ -116,7 +109,7 @@ func mergeCodexMCP(path, mcpBin string) error {
 	if removed {
 		verb = "updated"
 	}
-	fmt.Printf("  [ok] %s [mcp_servers.clawdchan] in %s (default_tool_approval_mode=approve)\n", verb, path)
+	fmt.Printf("    [ok] MCP → %s (%s, approve mode)\n", path, verb)
 	return nil
 }
 

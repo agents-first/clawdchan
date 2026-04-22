@@ -38,21 +38,14 @@ func copilotAgent() *agentWiring {
 
 func setupCopilot(yes bool, scopes map[string]string) error {
 	scope := strings.ToLower(strings.TrimSpace(scopes["mcp"]))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: defaulting to user scope (pass -copilot-mcp-scope=skip to opt out)")
-			scope = "user"
-		}
+	if scope == "" && (yes || !stdinIsTTY()) {
+		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Register clawdchan-mcp for GitHub Copilot CLI?")
-		fmt.Println("    Copilot CLI's documented MCP config is user-scope only: ~/.copilot/mcp-config.json")
-		fmt.Println("    [1] User-wide (recommended)")
-		fmt.Println("    [2] Skip")
-		switch promptChoice("  Choice [1]: ", 1, 2) {
+		fmt.Println("    MCP (~/.copilot/mcp-config.json, user only): [1] user (recommended)  [2] skip")
+		switch promptChoice("    Choice [1]: ", 1, 2) {
 		case 2:
-			return nil
+			scope = "skip"
 		default:
 			scope = "user"
 		}
@@ -72,7 +65,7 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 		path := filepath.Join(home, ".copilot", "mcp-config.json")
 		return mergeCopilotMCP(path, mcpBin)
 	case "skip":
-		fmt.Println("  Copilot MCP registration: skipped")
+		fmt.Println("    [ok] MCP → skipped")
 		return nil
 	default:
 		return fmt.Errorf("unknown -copilot-mcp-scope %q (use user|skip)", scope)
@@ -119,7 +112,7 @@ func mergeCopilotMCP(path, mcpBin string) error {
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("  [ok] wrote clawdchan MCP entry (tools=[\"*\"]) to %s\n", path)
+	fmt.Printf("    [ok] MCP → %s (tools=[\"*\"])\n", path)
 	return nil
 }
 

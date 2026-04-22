@@ -53,23 +53,16 @@ func setupClaudeCode(yes bool, scopes map[string]string) error {
 // action. Pass -cc-mcp-scope=skip to opt out.
 func setupClaudeCodeMCP(yes bool, flagScope string) error {
 	scope := strings.ToLower(strings.TrimSpace(flagScope))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: defaulting to user scope (pass -cc-mcp-scope=skip to opt out)")
-			scope = "user"
-		}
+	if scope == "" && (yes || !stdinIsTTY()) {
+		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Where should Claude Code find the clawdchan-mcp server?")
-		fmt.Println("    [1] User-wide (recommended) — registers once via `claude mcp add -s user`; available in every CC session")
-		fmt.Println("    [2] This project only — writes .mcp.json in the current directory")
-		fmt.Println("    [3] Skip — register manually later")
-		switch promptChoice("  Choice [1]: ", 1, 3) {
+		fmt.Println("    MCP: [1] user (recommended)  [2] project  [3] skip")
+		switch promptChoice("    Choice [1]: ", 1, 3) {
 		case 2:
 			scope = "project"
 		case 3:
-			return nil
+			scope = "skip"
 		default:
 			scope = "user"
 		}
@@ -86,7 +79,7 @@ func setupClaudeCodeMCP(yes bool, flagScope string) error {
 	case "project":
 		return installCCMCPProject(mcpBin)
 	case "skip":
-		fmt.Println("  MCP server registration: skipped")
+		fmt.Println("    [ok] MCP → skipped")
 		return nil
 	default:
 		return fmt.Errorf("unknown -cc-mcp-scope %q (use user|project|skip)", scope)
@@ -109,7 +102,7 @@ func installCCMCPUser(mcpBin string) error {
 	cmd := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		fmt.Printf("  [ok] registered clawdchan MCP server user-wide (%s)\n", mcpBin)
+		fmt.Printf("    [ok] MCP → user (%s)\n", mcpBin)
 		return nil
 	}
 	if strings.Contains(string(out), "already exists") {
@@ -118,7 +111,7 @@ func installCCMCPUser(mcpBin string) error {
 		if out2, err2 := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user").CombinedOutput(); err2 != nil {
 			return fmt.Errorf("claude mcp add (retry): %w: %s", err2, string(out2))
 		}
-		fmt.Printf("  [ok] updated clawdchan MCP server user-wide (%s)\n", mcpBin)
+		fmt.Printf("    [ok] MCP → user (updated, %s)\n", mcpBin)
 		return nil
 	}
 	return fmt.Errorf("claude mcp add: %w: %s", err, string(out))
@@ -141,7 +134,7 @@ func installCCMCPProject(mcpBin string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  [ok] wrote %s — restart Claude Code to pick up the new MCP server.\n", path)
+	fmt.Printf("    [ok] MCP → %s\n", path)
 	return nil
 }
 
@@ -164,28 +157,19 @@ func installCCMCPProject(mcpBin string) error {
 // sub-agents. Pass -cc-perm-scope=skip to opt out.
 func setupClaudeCodePermissions(yes bool, flagScope string) error {
 	scope := strings.ToLower(strings.TrimSpace(flagScope))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  Permissions: defaulting to user scope (pass -cc-perm-scope=skip to opt out)")
-			scope = "user"
-		}
+	if scope == "" && (yes || !stdinIsTTY()) {
+		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Where should the clawdchan_* allow-rule go?")
-		fmt.Println("    Without this rule, every clawdchan_* tool call prompts in Claude Code")
-		fmt.Println("    — which blocks live-collab sub-agents that can't answer prompts.")
-		fmt.Println("    [1] User settings (recommended) — ~/.claude/settings.json; every CC session")
-		fmt.Println("    [2] Project settings — .claude/settings.json; checked in, team-wide")
-		fmt.Println("    [3] Project-local — .claude/settings.local.json; personal, gitignored")
-		fmt.Println("    [4] Skip")
-		switch promptChoice("  Choice [1]: ", 1, 4) {
+		fmt.Println("    Permissions (without this, clawdchan_* prompts block sub-agents):")
+		fmt.Println("      [1] user (recommended)  [2] project  [3] project-local  [4] skip")
+		switch promptChoice("    Choice [1]: ", 1, 4) {
 		case 2:
 			scope = "project"
 		case 3:
 			scope = "project-local"
 		case 4:
-			return nil
+			scope = "skip"
 		default:
 			scope = "user"
 		}
@@ -213,7 +197,7 @@ func setupClaudeCodePermissions(yes bool, flagScope string) error {
 		}
 		settingsPath = filepath.Join(cwd, ".claude", "settings.local.json")
 	case "skip":
-		fmt.Println("  Permissions: skipped")
+		fmt.Println("    [ok] perm → skipped")
 		return nil
 	default:
 		return fmt.Errorf("unknown -cc-perm-scope %q (use user|project|project-local|skip)", scope)
@@ -224,8 +208,7 @@ func setupClaudeCodePermissions(yes bool, flagScope string) error {
 	}
 	if scope == "project-local" {
 		if err := ensureGitignoreEntry(".claude/settings.local.json"); err != nil {
-			fmt.Printf("  note: could not update .gitignore automatically: %v\n", err)
-			fmt.Println("  Add `.claude/settings.local.json` to your .gitignore manually.")
+			fmt.Printf("    note: update .gitignore manually: %v\n", err)
 		}
 	}
 	return nil
@@ -256,7 +239,7 @@ func mergeAllowRule(settingsPath, rule string) error {
 	allow, _ := perms["allow"].([]any)
 	for _, e := range allow {
 		if s, _ := e.(string); s == rule {
-			fmt.Printf("  [ok] %q already allowed in %s\n", rule, settingsPath)
+			fmt.Printf("    [ok] perm → %s (already present)\n", settingsPath)
 			return nil
 		}
 	}
@@ -274,7 +257,7 @@ func mergeAllowRule(settingsPath, rule string) error {
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("  [ok] added %q to %s\n", rule, settingsPath)
+	fmt.Printf("    [ok] perm → %s\n", settingsPath)
 	return nil
 }
 

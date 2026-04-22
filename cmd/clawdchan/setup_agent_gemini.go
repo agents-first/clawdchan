@@ -39,23 +39,16 @@ func geminiAgent() *agentWiring {
 
 func setupGemini(yes bool, scopes map[string]string) error {
 	scope := strings.ToLower(strings.TrimSpace(scopes["mcp"]))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: defaulting to user scope (pass -gemini-mcp-scope=skip to opt out)")
-			scope = "user"
-		}
+	if scope == "" && (yes || !stdinIsTTY()) {
+		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Where should Gemini CLI find the clawdchan-mcp server?")
-		fmt.Println("    [1] User-wide (recommended) — ~/.gemini/settings.json; available in every session")
-		fmt.Println("    [2] This project only — .gemini/settings.json in the current directory")
-		fmt.Println("    [3] Skip")
-		switch promptChoice("  Choice [1]: ", 1, 3) {
+		fmt.Println("    MCP: [1] user (recommended)  [2] project  [3] skip")
+		switch promptChoice("    Choice [1]: ", 1, 3) {
 		case 2:
 			scope = "project"
 		case 3:
-			return nil
+			scope = "skip"
 		default:
 			scope = "user"
 		}
@@ -81,7 +74,7 @@ func setupGemini(yes bool, scopes map[string]string) error {
 		}
 		path = filepath.Join(cwd, ".gemini", "settings.json")
 	case "skip":
-		fmt.Println("  Gemini MCP registration: skipped")
+		fmt.Println("    [ok] MCP → skipped")
 		return nil
 	default:
 		return fmt.Errorf("unknown -gemini-mcp-scope %q (use user|project|skip)", scope)
@@ -129,7 +122,7 @@ func mergeGeminiMCP(path, mcpBin string) error {
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("  [ok] wrote clawdchan MCP entry (trust=true) to %s\n", path)
+	fmt.Printf("    [ok] MCP → %s (trust=true)\n", path)
 	return nil
 }
 

@@ -69,7 +69,7 @@ func cmdSetup(args []string) error {
 	} else {
 		c, err := loadConfig()
 		if err == nil {
-			fmt.Printf("  [ok] configured: alias=%q relay=%s\n", c.Alias, c.RelayURL)
+			fmt.Printf("  [ok] %s @ %s\n", c.Alias, c.RelayURL)
 			if !*yes && stdinIsTTY() {
 				redo, _ := promptYN("  Update alias/relay? [y/N]: ", false)
 				if redo {
@@ -85,19 +85,22 @@ func cmdSetup(args []string) error {
 	// MCP/permissions sub-prompts. Agents the user didn't pick are
 	// silently skipped.
 	stepHeader(2, "Agent wiring")
+	if *yes {
+		fmt.Println("  (-y: defaults to user scope; pass -<agent>-<mcp|perm>-scope=skip to opt out)")
+	}
 	anyAgent := false
 	for _, a := range agents {
 		if !picks[a.key] {
 			continue
 		}
 		anyAgent = true
-		fmt.Printf("  — %s\n", a.displayName)
+		fmt.Printf("  %s:\n", a.displayName)
 		flatScopes := map[string]string{}
 		for scope, ptr := range scopes[a.key] {
 			flatScopes[scope] = *ptr
 		}
 		if err := a.setup(*yes, flatScopes); err != nil {
-			fmt.Printf("    note: %s: %v\n", a.displayName, err)
+			fmt.Printf("    note: %v\n", err)
 			warnings = append(warnings, fmt.Sprintf("%s: %v", a.displayName, err))
 		}
 	}
@@ -133,52 +136,36 @@ func cmdSetup(args []string) error {
 
 	fmt.Println()
 	if len(warnings) > 0 {
-		fmt.Printf("⚠ Setup finished with %d issue(s):\n", len(warnings))
+		fmt.Printf("⚠ Finished with %d issue(s):\n", len(warnings))
 		for _, w := range warnings {
 			fmt.Printf("  - %s\n", w)
 		}
-		fmt.Println()
-		fmt.Println("Run `clawdchan doctor` to diagnose, then re-run `clawdchan setup` if needed.")
-		fmt.Println("Next:")
+		fmt.Println("Run `clawdchan doctor` to diagnose, then re-run setup.")
 	} else {
-		fmt.Println("✅ Setup complete. Next:")
+		fmt.Println("✅ Setup complete.")
 	}
-	if picks["cc"] {
-		fmt.Println("  - Restart Claude Code so it loads the MCP server.")
-		fmt.Println(`    Ask Claude: "pair me with <friend> via clawdchan."`)
+	var wired []string
+	for _, a := range agents {
+		if picks[a.key] {
+			wired = append(wired, a.displayName)
+		}
 	}
-	if picks["gemini"] {
-		fmt.Println("  - Restart Gemini CLI so it loads the new MCP server entry.")
-	}
-	if picks["codex"] {
-		fmt.Println("  - Restart Codex so it re-reads ~/.codex/config.toml.")
-	}
-	if picks["copilot"] {
-		fmt.Println("  - Restart GitHub Copilot CLI so it re-reads ~/.copilot/mcp-config.json.")
+	if len(wired) > 0 {
+		fmt.Printf("   Restart: %s. Then ask any of them: \"pair me with <friend> via clawdchan.\"\n", strings.Join(wired, ", "))
 	}
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
-		fmt.Println("  - OpenClaw config changed — restart the daemon to pick it up:")
-		fmt.Println("      clawdchan daemon install -force")
+		fmt.Println("   OpenClaw config changed — restart the daemon: clawdchan daemon install -force")
 	}
 	if c, _ := loadConfig(); wantOC && c.OpenClawURL != "" {
-		fmt.Println()
-		fmt.Println("  OpenClaw:")
-		fmt.Println("    1. Open OpenClaw — you'll see a session named \"clawdchan:hub\".")
-		fmt.Println("    2. To start a pairing, just say: \"pair me with someone on clawdchan\".")
-		fmt.Println("       Your agent replies with 12 words. Send them to your friend.")
-		fmt.Println("    3. When your friend pastes their 12 words, say: \"consume these: <words>\".")
-		fmt.Println("    4. A new session for that peer appears automatically — talk there to chat.")
-		fmt.Println("    Other things you can say in the hub: \"who am I paired with\", \"any new messages\".")
+		fmt.Println(`   OpenClaw: open the "clawdchan:hub" session; say "pair me with someone on clawdchan".`)
 	}
 	return nil
 }
 
-// stepHeader prints a visual break + numbered title between setup
-// stages. Total step count is fixed at 5 regardless of which agents
-// the user picked.
-func stepHeader(n int, title string) {
-	fmt.Println()
-	fmt.Printf("Step %d of 5 — %s\n", n, title)
+// stepHeader prints a short section marker between setup stages.
+// Kept intentionally terse — the section names are self-explanatory.
+func stepHeader(_ int, title string) {
+	fmt.Printf("\n▸ %s\n", title)
 }
 
 // resolveAgentSelection decides which agents the setup flow wires.
@@ -202,16 +189,15 @@ func resolveAgentSelection(yes bool, agents []*agentWiring, selection map[string
 	}
 
 	fmt.Println()
-	fmt.Println("Which agents do you want to wire ClawdChan for?")
+	var parts []string
 	for i, a := range agents {
-		marker := " "
+		marker := ""
 		if a.defaultOn {
 			marker = "*"
 		}
-		fmt.Printf("  [%d]%s %s\n", i+1, marker, a.displayName)
+		parts = append(parts, fmt.Sprintf("[%d]%s %s", i+1, marker, a.displayName))
 	}
-	fmt.Println("  [0]  None of these (just identity, PATH, and the daemon)")
-	fmt.Println("       Enter comma-separated numbers (e.g. 1,3), or press Enter for defaults (*).")
+	fmt.Printf("Agents to wire (comma-sep, * = default, 0 = none): %s\n", strings.Join(parts, "  "))
 	line := promptLine("Choice: ")
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -414,14 +400,8 @@ func setupOpenClaw(yes bool, flagURL, flagToken, flagDeviceID string) (err error
 		fmt.Println("not found.")
 	}
 
-	fmt.Println("  OpenClaw integration (optional) — routes inbound envelopes into")
-	fmt.Println("  OpenClaw sessions alongside Claude Code.")
-	fmt.Println("  Your existing Claude Code setup is NOT touched either way.")
 	ok, err := promptYN("  Configure OpenClaw manually? [y/N]: ", false)
 	if err != nil || !ok {
-		if c.OpenClawURL == "" {
-			fmt.Println("  Skipped. The daemon will auto-detect at startup if available.")
-		}
 		return nil
 	}
 
@@ -476,11 +456,8 @@ func setupInit(yes bool) error {
 	relay := defaultRelay
 
 	if !yes && stdinIsTTY() {
-		fmt.Println("  Alias = how you appear to peers. Relay = server that forwards")
-		fmt.Println("  encrypted envelopes (ciphertext only; default is a convenience")
-		fmt.Println("  instance on fly.io, no SLA — deploy your own for prod: docs/deploy.md).")
-		alias = promptString(fmt.Sprintf("  Display alias [%s]: ", defaultAlias), defaultAlias)
-		relay = promptString(fmt.Sprintf("  Relay URL [%s]: ", defaultRelay), defaultRelay)
+		alias = promptString(fmt.Sprintf("  Alias [%s]: ", defaultAlias), defaultAlias)
+		relay = promptString(fmt.Sprintf("  Relay [%s]: ", defaultRelay), defaultRelay)
 		if strings.Contains(relay, "localhost") || strings.Contains(relay, "127.0.0.1") {
 			fmt.Println("  note: localhost relay isn't reachable by peers on other machines.")
 		}
@@ -500,7 +477,7 @@ func setupInit(yes bool) error {
 	}
 	defer n.Close()
 	nid := n.Identity()
-	fmt.Printf("  [ok] initialized node %s (alias=%q relay=%s)\n",
+	fmt.Printf("  [ok] node %s (%s @ %s)\n",
 		hex.EncodeToString(nid[:])[:16], c.Alias, c.RelayURL)
 	return nil
 }
