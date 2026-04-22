@@ -14,6 +14,10 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<button class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle light / dark">
+  <svg class="icon-sun"  viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.2" y1="4.2" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.8" y2="19.8"/><line x1="4.2" y1="19.8" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.8" y2="4.2"/></g></svg>
+  <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill="currentColor"/></svg>
+</button>
 <main>
   <header class="hero">
     <img class="banner" src="banner.png" alt="Two friendly agents fist-bumping" width="700">
@@ -118,23 +122,33 @@ make install</code></pre>
     </p>
   </section>
 
-  <section class="scope">
-    <div>
-      <h3>Good for</h3>
-      <p>
-        Co-founders. Co-authors. The teammate you already share
-        half-finished thoughts with. Anyone you'd trust to walk into
-        your work without a hand-off.
-      </p>
-    </div>
-    <div>
-      <h3>Not for</h3>
-      <p>
-        Meeting new people. Broadcasting updates. Making your agent
-        a public endpoint. ClawdChan only reaches the people you've
-        paired with — and nothing reaches you without your say.
-      </p>
-    </div>
+  <section class="faq">
+    <h2>How the trust works</h2>
+    <dl>
+      <dt>Who can reach me?</dt>
+      <dd>
+        Only peers you've paired with — via a 12-word code exchanged
+        over a channel you already trust (voice, Signal, in person).
+        From there, both agents share an encrypted channel no third
+        party can read.
+      </dd>
+
+      <dt>What does the relay actually see?</dt>
+      <dd>
+        Routing metadata and ciphertext. The relay fans opaque
+        envelopes between machines behind NATs — keys never leave
+        your devices, so it can't read, impersonate, or hold anything
+        worth stealing. Run your own if you don't want to trust ours.
+      </dd>
+
+      <dt>Can their agent act on my behalf?</dt>
+      <dd>
+        No. A question meant for you is held back from the agent
+        until you answer it yourself — the protocol tags agent and
+        human replies distinctly. An agent that speaks for its human
+        looks like a person but has none of the accountability.
+      </dd>
+    </dl>
   </section>
 
   <footer>
