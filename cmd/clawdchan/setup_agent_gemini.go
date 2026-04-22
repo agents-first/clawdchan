@@ -43,7 +43,10 @@ func setupGemini(yes bool, scopes map[string]string) error {
 		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println("    MCP: [1] user (recommended)  [2] project  [3] skip")
+		fmt.Println("    MCP scope:")
+		fmt.Printf("      %s user %s\n", cyan("[1]"), green("(recommended)"))
+		fmt.Printf("      %s project\n", cyan("[2]"))
+		fmt.Printf("      %s skip\n", cyan("[3]"))
 		switch promptChoice("    Choice [1]: ", 1, 3) {
 		case 2:
 			scope = "project"
@@ -74,7 +77,7 @@ func setupGemini(yes bool, scopes map[string]string) error {
 		}
 		path = filepath.Join(cwd, ".gemini", "settings.json")
 	case "skip":
-		fmt.Println("    [ok] MCP → skipped")
+		fmt.Printf("    %s MCP %s %s\n", okTag(), dim("→"), dim("skipped"))
 		return nil
 	default:
 		return fmt.Errorf("unknown -gemini-mcp-scope %q (use user|project|skip)", scope)
@@ -122,7 +125,7 @@ func mergeGeminiMCP(path, mcpBin string) error {
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("    [ok] MCP → %s (trust=true)\n", path)
+	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(path), dim("(trust=true)"))
 	return nil
 }
 
