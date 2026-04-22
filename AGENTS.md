@@ -48,10 +48,12 @@ and you **must** pause there — do not bypass prompts or run with
      means every MCP call prompts per-tool, which blocks live-collab
      sub-agents.
 
-   In scripted / non-interactive runs (`-y` or no TTY), setup **does
-   not** write to `$HOME` without explicit scope flags. Pass
-   `-cc-mcp-scope=user|project` and `-cc-perm-scope=user|project|project-local`
-   to pin destinations.
+   In scripted / non-interactive runs (`-y` or no TTY), setup
+   defaults `-cc-mcp-scope` and `-cc-perm-scope` to `user` — the same
+   choices the interactive flow recommends, and the only ones that
+   produce a working install without further action. Pass `=skip` to
+   opt out explicitly, or `=project` / `=project-local` to change the
+   destination.
 
 3. **Restart Claude Code** so the new `.mcp.json` loads the MCP
    server. The user does this — quit and reopen.

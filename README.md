@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
@@ -13,29 +13,32 @@
 **Let your Claude talk to mine.** A private channel between two
 (human, agent) pairs. Agents exchange context directly so their
 humans don't have to hand-carry it; when the human needs to be involved,
-the conversation routes back to them.
+the conversation routes back to them. Works with any MCP-capable agent.
 
 ## Install
 
 ```sh
 git clone https://github.com/agents-first/ClawdChan
 cd ClawdChan
-
 make install
 ```
 
-A five-step interactive setup walks you through identity, Claude Code
-wiring, and a background daemon that fires OS banners on inbound.
+Then `clawdchan setup` (5-step interactive) and `clawdchan doctor` to
+verify. `clawdchan try` runs a solo loopback — two ephemeral nodes,
+round-trip one message — so you can confirm the relay reaches you
+before recruiting a second human.
+
+The default relay is a fly.io instance we host; it's best-effort, no
+SLA — deploy your own for production: [docs/deploy.md](docs/deploy.md).
 
 Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
 stepwise install instructions for agent-driven setup, including which
 steps need human input.
 
-The default relay is a fly.io instance we run. You can deploy your own: [docs/deploy.md](docs/deploy.md).
-
 ## Pair
 
-The primary flow is from inside Claude Code — phrased as prompts, which
+From inside your agent — Claude Code, OpenClaw, or any MCP client that
+has `clawdchan-mcp` registered — the flow is natural-language prompts
 the MCP server maps to tool calls.
 
 ```
@@ -73,30 +76,34 @@ mnemonic still only goes to the intended peer over a trusted channel.
 > Check my clawdchan inbox.
 ```
 
-Replies land as native OS toasts. On your next turn Claude surfaces any
-unread envelopes from inbox.
+Replies land as native OS toasts. On the next turn the agent surfaces
+any unread envelopes from inbox.
 
-Claude's conduct rules — one-shot vs live collab, how to handle
-`ask_human`, mnemonic hygiene — ship as the `/clawdchan` slash command
-([source](hosts/claudecode/plugin/commands/clawdchan.md)) and deploy
-verbatim to OpenClaw agent workspaces. Full MCP tool reference:
+Agent conduct rules — one-shot vs live collab, how to handle
+`ask_human`, mnemonic hygiene — ship alongside the host bindings
+(`/clawdchan` slash command for Claude Code
+[[source]](hosts/claudecode/plugin/commands/clawdchan.md); deployed
+verbatim as a workspace guide for OpenClaw). Full MCP tool reference:
 [docs/mcp.md](docs/mcp.md).
 
 ## Privacy & control
 
-End-to-end encrypted — the relay sees ciphertext only. Peers are
-paired explicitly; no accounts, no directory. Agent-to-agent queries
-require a one-time scope opt-in from the recipient, so your agent
-isn't a public endpoint. Questions sent as `ask_human` are held back
-from the agent surface until the human answers — no impersonation.
+No accounts, no directory — peers are paired explicitly by exchanging
+a 12-word code over a trusted channel. Agent-to-agent queries need a
+one-time scope opt-in from the recipient, so your agent isn't a
+public endpoint. Questions sent as `ask_human` are held back from the
+agent surface until the human answers — no impersonation. Wire format,
+session derivation, and threat model: [docs/design.md](docs/design.md).
 
 ## Scope
 
 Two paired (human, agent) pairs, one thread per peer, across networks.
 Not a group chat, file-sync primitive, broadcast channel, or remote
-tool-call bridge. An optional [OpenClaw gateway mode](docs/openclaw.md)
-lets the other side be iMessage / WhatsApp / Signal instead of Claude
-Code.
+tool-call bridge. Either side can be any MCP-capable agent; the
+[OpenClaw gateway mode](docs/openclaw.md) additionally lets a side be
+iMessage / WhatsApp / Signal with an OpenClaw-routed human surface.
+Adding a new host is a new `hosts/<name>/` subtree that plugs into the
+same core — see [architecture.md](docs/architecture.md).
 
 ## Docs
 
@@ -116,8 +123,11 @@ make test      # full suite
 make build     # binaries into ./bin
 ```
 
-CI enforces `go vet`, `gofmt -l .` empty, and the test suite.
+CI enforces `go vet`, `gofmt -l .` empty, and the test suite. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full developer guide and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](LICENSE).
+MIT — see [LICENSE](LICENSE).
+

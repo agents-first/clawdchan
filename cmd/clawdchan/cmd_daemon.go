@@ -18,13 +18,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/store"
-	"github.com/agents-first/ClawdChan/core/surface"
-	"github.com/agents-first/ClawdChan/hosts/openclaw"
-	"github.com/agents-first/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/store"
+	"github.com/agents-first/clawdchan/core/surface"
+	"github.com/agents-first/clawdchan/hosts/openclaw"
+	"github.com/agents-first/clawdchan/internal/listenerreg"
 )
 
 // cmdDaemon dispatches the daemon subcommand.

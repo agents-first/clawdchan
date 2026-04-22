@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 func toolkitSpec() ToolSpec {

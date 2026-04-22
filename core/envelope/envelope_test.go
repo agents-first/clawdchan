@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/agents-first/ClawdChan/core/identity"
+	"github.com/agents-first/clawdchan/core/identity"
 )
 
 func fixture(t *testing.T) (*identity.Identity, Envelope) {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 func cmdThreads(_ []string) error {

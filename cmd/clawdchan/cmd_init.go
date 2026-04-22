@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 func cmdInit(args []string) error {

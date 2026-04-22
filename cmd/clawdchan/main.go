@@ -35,8 +35,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 type config struct {
@@ -62,9 +63,20 @@ const configFileName = "config.json"
 // or production use; see docs/deploy.md.
 const defaultPublicRelay = "wss://clawdchan-test-relay.fly.dev"
 
+// defaultDataDir returns the per-user data directory for the node.
+// Unix-y platforms keep the dotfile-style ~/.clawdchan that's been the
+// convention since v0. Windows uses %AppData%\clawdchan via
+// os.UserConfigDir — a dot-prefixed directory under the user's home is
+// hidden by default in Explorer, which made identities hard to find.
+// $CLAWDCHAN_HOME still wins on every platform.
 func defaultDataDir() string {
 	if v := os.Getenv("CLAWDCHAN_HOME"); v != "" {
 		return v
+	}
+	if runtime.GOOS == "windows" {
+		if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+			return filepath.Join(cfg, "clawdchan")
+		}
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".clawdchan")
@@ -106,6 +118,10 @@ func main() {
 		err = cmdPathSetup(args)
 	case "setup":
 		err = cmdSetup(args)
+	case "try":
+		err = cmdTry(args)
+	case "uninstall":
+		err = cmdUninstall(args)
 	case "inspect":
 		err = cmdInspect(args)
 	case "doctor":
@@ -132,6 +148,7 @@ Usage:
 
 Commands:
   setup       One-command onboarding: init + PATH + daemon (interactive)
+  try         Solo loopback demo — pairs two ephemeral nodes and round-trips a message
   init        Create config and identity (non-interactive)
   whoami      Print this node's id and alias
   pair        Generate a pairing code and wait for the peer (terminal fallback; CC is primary)
@@ -147,6 +164,7 @@ Commands:
   path-setup  Put $GOPATH/bin on your shell PATH (zsh/bash/fish)
   inspect     Print envelopes on a thread (debugging)
   doctor      Diagnose install, config, and relay connectivity
+  uninstall   Reverse setup — daemon service, data dir, MCP/permission hints
 
 Run 'clawdchan <command> -h' for per-command help.
 

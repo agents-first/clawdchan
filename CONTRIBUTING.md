@@ -109,7 +109,7 @@ Maintainers use these. You do not need to apply them yourself.
 
 If you find a vulnerability — anything that could forge an envelope, leak a
 session key, hijack a pairing, or bypass the policy gate — report it
-privately through [GitHub Security Advisories](https://github.com/agents-first/ClawdChan/security/advisories/new).
+privately through [GitHub Security Advisories](https://github.com/agents-first/clawdchan/security/advisories/new).
 Do not open a public issue.
 
 ## Code of conduct

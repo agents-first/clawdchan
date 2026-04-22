@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/pairing"
-	"github.com/agents-first/ClawdChan/core/store"
-	"github.com/agents-first/ClawdChan/core/surface"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/pairing"
+	"github.com/agents-first/clawdchan/core/store"
+	"github.com/agents-first/clawdchan/core/surface"
 )
 
 type mockSurfaceBridge struct {

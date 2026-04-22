@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/pairing"
-	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/pairing"
+	"github.com/agents-first/clawdchan/core/store"
 )
 
 const (

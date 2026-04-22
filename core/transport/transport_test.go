@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/transport"
-	"github.com/agents-first/ClawdChan/internal/relayserver"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/transport"
+	"github.com/agents-first/clawdchan/internal/relayserver"
 )
 
 func TestRoundTripThroughRelay(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/relaywire"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/relaywire"
 )
 
 // Config tunes retention and limits. Zero values are replaced with defaults.

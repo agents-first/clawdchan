@@ -1,0 +1,101 @@
+# goreleaser config for ClawdChan
+#
+# Runs on push of a v-prefixed tag via .github/workflows/release.yml.
+# Pure-Go build (no CGO) — modernc.org/sqlite ships with its own
+# translated runtime, so we can cross-compile to every supported OS
+# from a single Linux runner.
+#
+# Validate locally without publishing:
+#   goreleaser release --snapshot --clean
+version: 2
+
+project_name: clawdchan
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: clawdchan
+    main: ./cmd/clawdchan
+    binary: clawdchan
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+  - id: clawdchan-mcp
+    main: ./cmd/clawdchan-mcp
+    binary: clawdchan-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+  - id: clawdchan-relay
+    main: ./cmd/clawdchan-relay
+    binary: clawdchan-relay
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    ids: [clawdchan, clawdchan-mcp, clawdchan-relay]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else }}{{ title .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+
+release:
+  draft: true
+  prerelease: auto
+  header: |
+    Install:
+    ```sh
+    go install github.com/agents-first/clawdchan/cmd/clawdchan@{{ .Tag }}
+    go install github.com/agents-first/clawdchan/cmd/clawdchan-mcp@{{ .Tag }}
+    ```
+    Or grab a prebuilt binary below.

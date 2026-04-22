@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/agents-first/ClawdChan/internal/relayserver"
+	"github.com/agents-first/clawdchan/internal/relayserver"
 )
 
 func main() {
