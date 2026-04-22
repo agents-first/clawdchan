@@ -28,8 +28,9 @@ verify. `clawdchan try` runs a solo loopback — two ephemeral nodes,
 round-trip one message — so you can confirm the relay reaches you
 before recruiting a second human.
 
-The default relay is a fly.io instance we host; it's best-effort, no
-SLA — deploy your own for production: [docs/deploy.md](docs/deploy.md).
+> [!NOTE]
+> The default relay is a fly.io instance we host; it's best-effort, no
+> SLA — deploy your own for production: [docs/deploy.md](docs/deploy.md).
 
 Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
 stepwise install instructions for agent-driven setup, including which
