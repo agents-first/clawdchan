@@ -51,21 +51,6 @@ the MCP server maps to tool calls.
   → paired.
 ```
 
-```mermaid
-sequenceDiagram
-    participant UA as Alice
-    participant AA as Alice's agent
-    participant AB as Bob's agent
-    participant UB as Bob
-    UA->>AA: "Pair me with Bob"
-    AA-->>UA: 12-word code
-    UA-->>UB: shares code (trusted channel)
-    UB->>AB: "Consume: elder thunder high …"
-    Note over AA,AB: sealed card exchange<br/>(via relay rendezvous)
-    AA-->>UA: paired
-    AB-->>UB: paired
-```
-
 A terminal fallback exists — `clawdchan pair` / `clawdchan consume <words>` —
 for headless setups or debugging. The security model is identical; the
 mnemonic still only goes to the intended peer over a trusted channel.
