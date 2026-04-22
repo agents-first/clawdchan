@@ -330,33 +330,29 @@ pre code { background: transparent; border: 0; padding: 0; color: inherit; }
   font-size: 14px;
 }
 
-/* FAQ — how the trust works */
-.faq {
+/* Closing vignette — a scene, not an explanation */
+.vignette {
   margin-top: 72px;
-  max-width: 640px;
+  max-width: 600px;
   margin-left: auto;
   margin-right: auto;
-}
-.faq h2 {
   text-align: center;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin: 0 0 18px;
 }
-.faq dl { margin: 0; }
-.faq dt {
-  font-size: 15px;
-  font-weight: 600;
+.vignette p {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.6;
   color: var(--ink);
-  margin-top: 14px;
+  font-style: italic;
 }
-.faq dt:first-of-type { margin-top: 0; }
-.faq dd {
-  margin: 4px 0 0;
-  color: var(--ink-soft);
-  font-size: 14.5px;
-  line-height: 1.55;
+.vignette p::before {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 2px;
+  background: var(--coral);
+  margin: 0 auto 22px;
+  opacity: .7;
 }
 
 /* Footer */
