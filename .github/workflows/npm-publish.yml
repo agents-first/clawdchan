@@ -1,9 +1,14 @@
 name: npm-publish
 
-# Triggered when a GitHub Release flips from draft to published.
-# goreleaser creates the release as a draft (see .goreleaser.yaml — release.draft: true);
-# once the user reviews and publishes it, this workflow pins the npm package to the
-# release tag and publishes it to npmjs.com. Requires NPM_TOKEN in repo secrets.
+# Publishes the clawdchan npm package via npm Trusted Publishing (OIDC).
+# No NPM_TOKEN needed — npmjs.com authenticates the workflow by its
+# repo + filename + ref, configured under the package's Trusted Publishers.
+#
+# Flow:
+#   1. goreleaser (release.yml) tags a build, creates a draft GitHub Release.
+#   2. You review the draft and click "Publish release".
+#   3. This workflow fires on release:published, pins npm/package.json to
+#      the release tag, and publishes with provenance attestation.
 on:
   release:
     types: [published]
@@ -15,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # required by npm Trusted Publishing
 
 jobs:
   publish:
@@ -31,6 +37,9 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm to a version that supports Trusted Publishing
+        run: npm install -g npm@latest
 
       - name: Pin package version to release tag
         env:
@@ -49,7 +58,5 @@ jobs:
           echo "Probing $URL"
           curl -fsSLI "$URL" >/dev/null
 
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (Trusted Publishing + provenance)
+        run: npm publish --access public --provenance

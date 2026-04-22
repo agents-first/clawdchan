@@ -1,9 +1,9 @@
 #!/bin/sh
 # ClawdChan installer.
 #
-#   curl -fsSL https://clawdchan.io/install.sh | sh
-#   curl -fsSL https://clawdchan.io/install.sh | sh -s -- --version v0.1.0
-#   curl -fsSL https://clawdchan.io/install.sh | sh -s -- --prefix ~/.local
+#   curl -fsSL https://clawdchan.ai/install.sh | sh
+#   curl -fsSL https://clawdchan.ai/install.sh | sh -s -- --version v0.1.0
+#   curl -fsSL https://clawdchan.ai/install.sh | sh -s -- --prefix ~/.local
 #
 # Downloads the matching prebuilt archive from GitHub Releases, unpacks
 # clawdchan, clawdchan-mcp, clawdchan-relay into a bin dir, and optionally
