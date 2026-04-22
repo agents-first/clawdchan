@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 // cmdSetup is the interactive onboarding flow. It chains initial config
@@ -203,15 +203,19 @@ func resolveAgentSelection(yes bool, flagCC, flagOC string) (cc, oc bool) {
 //     sessions opened from here; checked in with the project
 //   - skip:    do nothing; user can register manually later
 //
-// In -y / non-TTY mode we default to "skip" unless an explicit
-// -cc-mcp-scope flag was passed — no home-dir writes without consent.
+// In -y / non-TTY mode, absent an explicit -cc-mcp-scope flag, we
+// default to "user" — the same choice the interactive flow recommends
+// and the only one that produces a working install without further
+// action. Pass -cc-mcp-scope=skip to opt out.
 func setupClaudeCodeMCP(yes bool, flagScope string) error {
 	scope := strings.ToLower(strings.TrimSpace(flagScope))
 	if scope == "" {
 		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: skipped (pass -cc-mcp-scope=user|project to pin in scripted runs)")
-			return nil
+			fmt.Println("  MCP server registration: defaulting to user scope (pass -cc-mcp-scope=skip to opt out)")
+			scope = "user"
 		}
+	}
+	if scope == "" {
 		fmt.Println()
 		fmt.Println("  Where should Claude Code find the clawdchan-mcp server?")
 		fmt.Println("    [1] User-wide (recommended) — registers once via `claude mcp add -s user`; available in every CC session")
@@ -310,15 +314,19 @@ func installCCMCPProject(mcpBin string) error {
 //   - project-local: .claude/settings.local.json — personal, gitignored
 //   - skip:          leave per-call prompts in place
 //
-// In -y / non-TTY mode we default to "skip" unless -cc-perm-scope was
-// passed — no home-dir or repo writes without explicit consent.
+// In -y / non-TTY mode, absent an explicit -cc-perm-scope flag, we
+// default to "user" so the clawdchan_* allow-rule is in place for
+// every CC session. Without it, per-call prompts block live-collab
+// sub-agents. Pass -cc-perm-scope=skip to opt out.
 func setupClaudeCodePermissions(yes bool, flagScope string) error {
 	scope := strings.ToLower(strings.TrimSpace(flagScope))
 	if scope == "" {
 		if yes || !stdinIsTTY() {
-			fmt.Println("  Permissions: skipped (pass -cc-perm-scope=user|project|project-local to pin in scripted runs)")
-			return nil
+			fmt.Println("  Permissions: defaulting to user scope (pass -cc-perm-scope=skip to opt out)")
+			scope = "user"
 		}
+	}
+	if scope == "" {
 		fmt.Println()
 		fmt.Println("  Where should the clawdchan_* allow-rule go?")
 		fmt.Println("    Without this rule, every clawdchan_* tool call prompts in Claude Code")

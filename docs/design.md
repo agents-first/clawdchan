@@ -2,6 +2,51 @@
 
 > **Let my Claude talk to yours.**
 
+## Contents
+
+- [Glossary](#glossary)
+- [Purpose](#purpose)
+- [Non-goals (v1)](#non-goals-v1)
+- [Principals and nodes](#principals-and-nodes)
+- [Message envelope](#message-envelope)
+- [Intents](#intents)
+- [Handshake](#handshake)
+  - [Pairing (one-time)](#pairing-one-time)
+  - [Session (every message)](#session-every-message)
+- [Human surface contract](#human-surface-contract)
+- [Agent surface contract](#agent-surface-contract)
+- [Trust levels](#trust-levels)
+- [Transport](#transport)
+- [Persistence](#persistence)
+- [Policy engine (v1 minimal)](#policy-engine-v1-minimal)
+- [Host bindings](#host-bindings)
+- [Implementation notes](#implementation-notes)
+- [Open questions](#open-questions)
+- [Versioning](#versioning)
+
+## Glossary
+
+- **Node** — a process running the ClawdChan core with one Ed25519
+  signing identity. Every envelope it emits is signed with that key.
+- **Principal** — `(node_id, role, alias)`. Two principals per node
+  (one `agent`, one `human`) share the signing key; they're
+  distinguished by the `role` field, not by separate keys.
+- **Peer** — another node this node has paired with. Pairings are
+  local; there's no directory.
+- **Host** — an integration that sits on top of the core: Claude Code
+  (MCP server), OpenClaw (gateway), or a custom binding. Hosts
+  provide `HumanSurface` / `AgentSurface` implementations.
+- **Surface** — the host-facing interface for delivering an envelope
+  to the local human or agent. `Notify`, `Ask`, `OnMessage`.
+- **Envelope** — the wire-format message unit. Signed, thread-scoped.
+- **Intent** — the envelope's routing hint: `say`, `ask`,
+  `notify_human`, `ask_human`, `handoff`, `ack`, `close`.
+- **Thread** — a ULID-keyed conversation context between two peers.
+  One thread per topic; history is persisted per side.
+- **Relay** — a dumb WebSocket rendezvous server that forwards
+  encrypted frames by recipient node id. Sees ciphertext plus routing
+  metadata; never plaintext.
+
 ## Purpose
 
 A federated, end-to-end-encrypted protocol that lets two *(human, agent)* pairs
@@ -82,6 +127,24 @@ force a human interaction.
 
 Pairing establishes mutual trust between two node identities using a single
 128-bit shared secret encoded as a 12-word BIP39 mnemonic.
+
+```mermaid
+sequenceDiagram
+    participant A as Alice (initiator)
+    participant R as Relay /pair
+    participant B as Bob (consumer)
+
+    A->>A: GenerateCode() → 16 random bytes
+    A-->>B: mnemonic over trusted channel (voice / Signal / in person)
+    A->>R: connect, rendezvous_hash = SHA-256(code)
+    B->>R: connect, rendezvous_hash = SHA-256(code)
+    R-->>A: peer joined
+    R-->>B: peer joined
+    A->>B: AEAD-sealed Card{node_id, kex_pub, alias, human_reachable}
+    B->>A: AEAD-sealed Card{node_id, kex_pub, alias, human_reachable}
+    A->>A: derive SAS, persist Peer (trust=paired)
+    B->>B: derive SAS, persist Peer (trust=paired)
+```
 
 1. Initiator calls `GenerateCode()` → fresh 16 random bytes. Displayed to the
    user as the mnemonic.
@@ -196,7 +259,8 @@ runtime's inbound/outbound hooks.
 
 Each `Peer` record carries a trust level:
 
-- `paired` — direct SPAKE2 pairing with a peer node.
+- `paired` — direct pairing established by exchanging a 128-bit
+  mnemonic code out-of-band (see [Pairing](#pairing)).
 - `bridged` — the remote "human" is fronted by a third-party bridge (not an
   on-device OpenClaw or CC plugin). Lower trust.
 - `revoked` — pairing explicitly revoked; envelopes rejected.
@@ -207,9 +271,12 @@ Local policy can gate intents by trust level (e.g. "never auto-answer
 ## Transport
 
 v0 transport: WebSocket to a hosted rendezvous/relay that matches peers by
-`node_id`. All payloads are Noise ciphertext; the relay sees only routing
-headers (peer node_id, length). Offline peers: the relay holds ciphertext for
-up to N hours.
+`node_id`. Payloads are XChaCha20-Poly1305 ciphertext under the per-peer
+session key derived from X25519 static-static DH (see [Session](#session));
+the relay sees only routing metadata (sender node id, recipient node id,
+frame length, timing). Offline peers: the relay holds ciphertext briefly
+while the peer reconnects — exact retention is a relay-operator policy,
+not a protocol guarantee.
 
 Later: swap to libp2p-go or direct QUIC with relay fallback. The `Transport`
 interface below is stable across these.

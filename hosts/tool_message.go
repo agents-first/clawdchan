@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/policy"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/policy"
 )
 
 func messageSpec() ToolSpec {

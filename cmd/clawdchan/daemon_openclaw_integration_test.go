@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agents-first/ClawdChan/internal/relayserver"
+	"github.com/agents-first/clawdchan/internal/relayserver"
 	"github.com/gorilla/websocket"
 )
 

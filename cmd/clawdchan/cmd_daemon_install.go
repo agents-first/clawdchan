@@ -17,8 +17,8 @@ import (
 
 	"github.com/mattn/go-isatty"
 
-	"github.com/agents-first/ClawdChan/core/notify"
-	"github.com/agents-first/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/clawdchan/core/notify"
+	"github.com/agents-first/clawdchan/internal/listenerreg"
 )
 
 const launchdLabel = "com.vmaroon.clawdchan.daemon"

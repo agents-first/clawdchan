@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/store"
 )
 
 type capturedSend struct {

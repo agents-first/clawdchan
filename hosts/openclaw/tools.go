@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/hosts"
-	"github.com/agents-first/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/hosts"
+	"github.com/agents-first/clawdchan/internal/listenerreg"
 )
 
 // ToolHandler is the bridge's native tool handler signature. params

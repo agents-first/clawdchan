@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agents-first/ClawdChan/hosts/openclaw"
-	"github.com/agents-first/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/clawdchan/hosts/openclaw"
+	"github.com/agents-first/clawdchan/internal/listenerreg"
 )
 
 func cmdDoctor(args []string) error {

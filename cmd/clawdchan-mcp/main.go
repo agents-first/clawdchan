@@ -20,15 +20,17 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/surface"
-	"github.com/agents-first/ClawdChan/hosts/claudecode"
-	"github.com/agents-first/ClawdChan/internal/listenerreg"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/surface"
+	"github.com/agents-first/clawdchan/hosts/claudecode"
+	"github.com/agents-first/clawdchan/internal/listenerreg"
 )
 
 type config struct {
@@ -44,7 +46,13 @@ func main() {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("clawdchan-mcp: %v", err)
+		// The MCP server is launched by Claude Code; its stderr is
+		// typically swallowed. Dying here leaves the user with an opaque
+		// "server failed to start" with no hint. Instead, serve a minimal
+		// stub so the actionable message surfaces inside Claude Code.
+		log.Printf("clawdchan-mcp: %v — serving setup-hint stub", err)
+		serveUnconfigured(err)
+		return
 	}
 
 	n, err := node.New(node.Config{
@@ -135,8 +143,15 @@ func daemonStateForNode(dataDir, nodeID string) daemonMode {
 func loadConfig() (config, error) {
 	home := os.Getenv("CLAWDCHAN_HOME")
 	if home == "" {
-		h, _ := os.UserHomeDir()
-		home = filepath.Join(h, ".clawdchan")
+		if runtime.GOOS == "windows" {
+			if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+				home = filepath.Join(cfg, "clawdchan")
+			}
+		}
+		if home == "" {
+			h, _ := os.UserHomeDir()
+			home = filepath.Join(h, ".clawdchan")
+		}
 	}
 	data, err := os.ReadFile(filepath.Join(home, "config.json"))
 	if err != nil {
@@ -153,4 +168,48 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("config: relay_url is empty")
 	}
 	return c, nil
+}
+
+// serveUnconfigured runs a stub MCP server when we can't load a real
+// config. It registers a single clawdchan_toolkit tool whose response
+// tells the agent exactly what to tell the user — open a terminal,
+// run `clawdchan setup`, restart Claude Code. Any call to an unknown
+// tool returns the same hint. This keeps the failure mode inside
+// Claude Code's tool surface instead of a swallowed stderr line.
+func serveUnconfigured(startupErr error) {
+	msg := fmt.Sprintf(
+		"ClawdChan is not configured on this machine.\n\n"+
+			"Open a terminal and run:\n\n"+
+			"    clawdchan setup\n\n"+
+			"Then fully quit and reopen Claude Code so the MCP server "+
+			"picks up the new config. Run `clawdchan doctor` to verify.\n\n"+
+			"(Startup error: %v)", startupErr)
+
+	hint := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]any{
+			"setup": map[string]any{
+				"configured":                 false,
+				"needs_persistent_listener":  true,
+				"persistent_listener_active": false,
+				"mcp_self_is_listener":       false,
+				"user_message":               msg,
+			},
+			"self":  nil,
+			"peers": []any{},
+		}
+		b, _ := json.MarshalIndent(payload, "", "  ")
+		return mcp.NewToolResultText(string(b)), nil
+	}
+
+	s := server.NewMCPServer("clawdchan", version)
+	s.AddTool(
+		mcp.NewTool(
+			"clawdchan_toolkit",
+			mcp.WithDescription("ClawdChan is not configured; this tool returns setup instructions. Run `clawdchan setup` in a terminal, then restart Claude Code."),
+		),
+		hint,
+	)
+	if err := server.ServeStdio(s); err != nil {
+		log.Printf("clawdchan-mcp: serve (unconfigured): %v", err)
+	}
 }

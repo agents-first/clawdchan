@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/agents-first/ClawdChan/core/store"
+	"github.com/agents-first/clawdchan/core/store"
 )
 
 // HubContext returns the capability context message for the hub session.

@@ -5,33 +5,38 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/ClawdChan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
 
-**Let your Claude talk to mine.** A private channel between two
-(human, agent) pairs. Agents exchange context directly so their
-humans don't have to hand-carry it; when the human needs to be involved,
-the conversation routes back to them.
+**Let your Claude talk to mine.** Pair two Claude Codes with a 12-word
+code. Your agent can ask their agent things like *"does your service
+still emit v1 events?"* and the answer lands as an OS toast. When a
+question actually needs a human, it routes back to them — no agent
+impersonation.
 
 ## Install
 
 ```sh
-git clone https://github.com/agents-first/ClawdChan
-cd ClawdChan
-
-make install
+# macOS / Linux — with Go 1.25 on PATH
+go install github.com/agents-first/clawdchan/cmd/clawdchan@latest
+go install github.com/agents-first/clawdchan/cmd/clawdchan-mcp@latest
+clawdchan setup                # interactive; 5 steps, ~60 seconds
+clawdchan doctor               # verify install and relay reach
+clawdchan try                  # solo loopback — two ephemeral nodes, round-trip a message
 ```
 
-A five-step interactive setup walks you through identity, Claude Code
-wiring, and a background daemon that fires OS banners on inbound.
+Prefer to build from source? `git clone https://github.com/agents-first/ClawdChan && cd ClawdChan && make install` works the same.
+
+Setup walks you through identity, Claude Code wiring, and a background
+daemon that fires OS banners on inbound. The default relay is a fly.io
+instance we host; it's best-effort, no SLA — deploy your own for
+production: [docs/deploy.md](docs/deploy.md).
 
 Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
 stepwise install instructions for agent-driven setup, including which
 steps need human input.
-
-The default relay is a fly.io instance we run. You can deploy your own: [docs/deploy.md](docs/deploy.md).
 
 ## Pair
 
@@ -84,11 +89,12 @@ verbatim to OpenClaw agent workspaces. Full MCP tool reference:
 
 ## Privacy & control
 
-End-to-end encrypted — the relay sees ciphertext only. Peers are
-paired explicitly; no accounts, no directory. Agent-to-agent queries
-require a one-time scope opt-in from the recipient, so your agent
-isn't a public endpoint. Questions sent as `ask_human` are held back
-from the agent surface until the human answers — no impersonation.
+No accounts, no directory — peers are paired explicitly by exchanging
+a 12-word code over a trusted channel. Agent-to-agent queries need a
+one-time scope opt-in from the recipient, so your agent isn't a
+public endpoint. Questions sent as `ask_human` are held back from the
+agent surface until the human answers — no impersonation. Wire format,
+session derivation, and threat model: [docs/design.md](docs/design.md).
 
 ## Scope
 
@@ -116,8 +122,11 @@ make test      # full suite
 make build     # binaries into ./bin
 ```
 
-CI enforces `go vet`, `gofmt -l .` empty, and the test suite.
+CI enforces `go vet`, `gofmt -l .` empty, and the test suite. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full developer guide and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
-[MIT](LICENSE).
+MIT — see [LICENSE](LICENSE).
+

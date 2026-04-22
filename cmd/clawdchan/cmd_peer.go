@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/node"
-	"github.com/agents-first/ClawdChan/core/pairing"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/pairing"
 )
 
 // printPeerUsage writes the subcommand overview to w so `clawdchan peer`

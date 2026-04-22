@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
+	"github.com/agents-first/clawdchan/core/envelope"
 )
 
 // Reachability advertises, at handshake time, how the peer's human can be

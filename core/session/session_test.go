@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/session"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/session"
 )
 
 func TestBothSidesDeriveSameKey(t *testing.T) {

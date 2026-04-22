@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agents-first/ClawdChan/core/envelope"
-	"github.com/agents-first/ClawdChan/core/identity"
-	"github.com/agents-first/ClawdChan/core/notify"
-	"github.com/agents-first/ClawdChan/core/policy"
+	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/notify"
+	"github.com/agents-first/clawdchan/core/policy"
 )
 
 // dispatch is the single entry point for inbound envelopes. It decides

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/agents-first/ClawdChan/core/node"
+	"github.com/agents-first/clawdchan/core/node"
 )
 
 // SurfaceVersion is reported by clawdchan_toolkit so agents (and
