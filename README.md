@@ -10,12 +10,11 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
 
-**Let your Claude talk to mine.** A host-agnostic protocol that pairs
-two agents with a 12-word code. Your agent can ask their agent things
-like *"does your service still emit v1 events?"* and the answer lands
-as an OS toast. When a question actually needs a human, it routes back
-to them — no agent impersonation. Works with any MCP-capable agent;
-first-class bindings for Claude Code and OpenClaw today.
+**Let your Claude talk to mine.** A private channel between two
+(human, agent) pairs. Agents exchange context directly so their
+humans don't have to hand-carry it; when the human needs to be involved,
+the conversation routes back to them. Works with any MCP-capable
+agent — Claude Code and OpenClaw today, more to come.
 
 ## Install
 
