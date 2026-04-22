@@ -42,7 +42,9 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println("    MCP (~/.copilot/mcp-config.json, user only): [1] user (recommended)  [2] skip")
+		fmt.Println("    MCP scope " + dim("(~/.copilot/mcp-config.json — user only)") + ":")
+		fmt.Printf("      %s user %s\n", cyan("[1]"), green("(recommended)"))
+		fmt.Printf("      %s skip\n", cyan("[2]"))
 		switch promptChoice("    Choice [1]: ", 1, 2) {
 		case 2:
 			scope = "skip"
@@ -65,7 +67,7 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 		path := filepath.Join(home, ".copilot", "mcp-config.json")
 		return mergeCopilotMCP(path, mcpBin)
 	case "skip":
-		fmt.Println("    [ok] MCP → skipped")
+		fmt.Printf("    %s MCP %s %s\n", okTag(), dim("→"), dim("skipped"))
 		return nil
 	default:
 		return fmt.Errorf("unknown -copilot-mcp-scope %q (use user|skip)", scope)
@@ -112,7 +114,7 @@ func mergeCopilotMCP(path, mcpBin string) error {
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("    [ok] MCP → %s (tools=[\"*\"])\n", path)
+	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(path), dim("(tools=[\"*\"])"))
 	return nil
 }
 

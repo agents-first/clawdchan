@@ -46,7 +46,7 @@ func cmdSetup(args []string) error {
 
 	fs.Parse(args)
 
-	fmt.Println("🐾 ClawdChan setup")
+	fmt.Println(bold("🐾 ClawdChan setup"))
 
 	// Upfront agent selection (which agents + OpenClaw).
 	picks := resolveAgentSelection(*yes, agents, selection)
@@ -69,7 +69,7 @@ func cmdSetup(args []string) error {
 	} else {
 		c, err := loadConfig()
 		if err == nil {
-			fmt.Printf("  [ok] %s @ %s\n", c.Alias, c.RelayURL)
+			fmt.Printf("  %s %s %s %s\n", okTag(), c.Alias, dim("@"), dim(c.RelayURL))
 			if !*yes && stdinIsTTY() {
 				redo, _ := promptYN("  Update alias/relay? [y/N]: ", false)
 				if redo {
@@ -86,7 +86,7 @@ func cmdSetup(args []string) error {
 	// silently skipped.
 	stepHeader(2, "Agent wiring")
 	if *yes {
-		fmt.Println("  (-y: defaults to user scope; pass -<agent>-<mcp|perm>-scope=skip to opt out)")
+		fmt.Println(dim("  (-y: defaults to user scope; pass -<agent>-<mcp|perm>-scope=skip to opt out)"))
 	}
 	anyAgent := false
 	for _, a := range agents {
@@ -94,18 +94,18 @@ func cmdSetup(args []string) error {
 			continue
 		}
 		anyAgent = true
-		fmt.Printf("  %s:\n", a.displayName)
+		fmt.Printf("  %s\n", bold(a.displayName+":"))
 		flatScopes := map[string]string{}
 		for scope, ptr := range scopes[a.key] {
 			flatScopes[scope] = *ptr
 		}
 		if err := a.setup(*yes, flatScopes); err != nil {
-			fmt.Printf("    note: %v\n", err)
+			fmt.Printf("    %s %v\n", warnTag(), err)
 			warnings = append(warnings, fmt.Sprintf("%s: %v", a.displayName, err))
 		}
 	}
 	if !anyAgent {
-		fmt.Println("  (no agents selected)")
+		fmt.Println(dim("  (no agents selected)"))
 	}
 
 	// Step 3: PATH wiring.
@@ -123,7 +123,7 @@ func cmdSetup(args []string) error {
 			warnings = append(warnings, fmt.Sprintf("OpenClaw: %v", err))
 		}
 	} else {
-		fmt.Println("  (skipped — agent selection excluded OpenClaw)")
+		fmt.Println(dim("  (skipped — agent selection excluded OpenClaw)"))
 	}
 
 	// Step 5: background daemon. Runs last so any OpenClaw config it
@@ -136,13 +136,13 @@ func cmdSetup(args []string) error {
 
 	fmt.Println()
 	if len(warnings) > 0 {
-		fmt.Printf("⚠ Finished with %d issue(s):\n", len(warnings))
+		fmt.Printf("%s Finished with %d issue(s):\n", yellow("⚠"), len(warnings))
 		for _, w := range warnings {
-			fmt.Printf("  - %s\n", w)
+			fmt.Printf("  %s %s\n", dim("-"), w)
 		}
-		fmt.Println("Run `clawdchan doctor` to diagnose, then re-run setup.")
+		fmt.Printf("Run %s to diagnose, then re-run setup.\n", cyan("`clawdchan doctor`"))
 	} else {
-		fmt.Println("✅ Setup complete.")
+		fmt.Println(green("✅ Setup complete."))
 	}
 	var wired []string
 	for _, a := range agents {
@@ -151,13 +151,15 @@ func cmdSetup(args []string) error {
 		}
 	}
 	if len(wired) > 0 {
-		fmt.Printf("   Restart: %s. Then ask any of them: \"pair me with <friend> via clawdchan.\"\n", strings.Join(wired, ", "))
+		fmt.Printf("   Restart: %s.\n", bold(strings.Join(wired, ", ")))
+		fmt.Printf("   Then ask any of them: %s\n", cyan(`"pair me with <friend> via clawdchan."`))
 	}
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
-		fmt.Println("   OpenClaw config changed — restart the daemon: clawdchan daemon install -force")
+		fmt.Printf("   OpenClaw config changed — restart the daemon: %s\n", cyan("clawdchan daemon install -force"))
 	}
 	if c, _ := loadConfig(); wantOC && c.OpenClawURL != "" {
-		fmt.Println(`   OpenClaw: open the "clawdchan:hub" session; say "pair me with someone on clawdchan".`)
+		fmt.Printf(`   OpenClaw: open the %s session; say %s`+"\n",
+			cyan(`"clawdchan:hub"`), cyan(`"pair me with someone on clawdchan"`))
 	}
 	return nil
 }
@@ -165,7 +167,7 @@ func cmdSetup(args []string) error {
 // stepHeader prints a short section marker between setup stages.
 // Kept intentionally terse — the section names are self-explanatory.
 func stepHeader(_ int, title string) {
-	fmt.Printf("\n▸ %s\n", title)
+	fmt.Printf("\n%s %s\n", cyan("▸"), bold(title))
 }
 
 // resolveAgentSelection decides which agents the setup flow wires.
@@ -189,15 +191,15 @@ func resolveAgentSelection(yes bool, agents []*agentWiring, selection map[string
 	}
 
 	fmt.Println()
-	var parts []string
+	fmt.Println(bold("Agents to wire ") + dim("(comma-separated; blank = defaults marked *)"))
 	for i, a := range agents {
-		marker := ""
+		suffix := ""
 		if a.defaultOn {
-			marker = "*"
+			suffix = " " + green("(default)")
 		}
-		parts = append(parts, fmt.Sprintf("[%d]%s %s", i+1, marker, a.displayName))
+		fmt.Printf("  %s %s%s\n", cyan(fmt.Sprintf("[%d]", i+1)), a.displayName, suffix)
 	}
-	fmt.Printf("Agents to wire (comma-sep, * = default, 0 = none): %s\n", strings.Join(parts, "  "))
+	fmt.Printf("  %s %s\n", cyan("[0]"), dim("None — just identity, PATH, and the daemon"))
 	line := promptLine("Choice: ")
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -477,8 +479,9 @@ func setupInit(yes bool) error {
 	}
 	defer n.Close()
 	nid := n.Identity()
-	fmt.Printf("  [ok] node %s (%s @ %s)\n",
-		hex.EncodeToString(nid[:])[:16], c.Alias, c.RelayURL)
+	fmt.Printf("  %s node %s %s\n",
+		okTag(), dim(hex.EncodeToString(nid[:])[:16]),
+		dim(fmt.Sprintf("(%s @ %s)", c.Alias, c.RelayURL)))
 	return nil
 }
 

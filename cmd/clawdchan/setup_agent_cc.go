@@ -57,7 +57,10 @@ func setupClaudeCodeMCP(yes bool, flagScope string) error {
 		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println("    MCP: [1] user (recommended)  [2] project  [3] skip")
+		fmt.Println("    MCP scope:")
+		fmt.Printf("      %s user %s\n", cyan("[1]"), green("(recommended)"))
+		fmt.Printf("      %s project\n", cyan("[2]"))
+		fmt.Printf("      %s skip\n", cyan("[3]"))
 		switch promptChoice("    Choice [1]: ", 1, 3) {
 		case 2:
 			scope = "project"
@@ -79,7 +82,7 @@ func setupClaudeCodeMCP(yes bool, flagScope string) error {
 	case "project":
 		return installCCMCPProject(mcpBin)
 	case "skip":
-		fmt.Println("    [ok] MCP → skipped")
+		fmt.Printf("    %s MCP %s %s\n", okTag(), dim("→"), dim("skipped"))
 		return nil
 	default:
 		return fmt.Errorf("unknown -cc-mcp-scope %q (use user|project|skip)", scope)
@@ -93,8 +96,8 @@ func setupClaudeCodeMCP(yes bool, flagScope string) error {
 func installCCMCPUser(mcpBin string) error {
 	claudeCLI, err := exec.LookPath("claude")
 	if err != nil {
-		fmt.Println("  User-wide MCP registration needs the `claude` CLI. Run this when you have it available:")
-		fmt.Printf("      claude mcp add clawdchan %s -s user\n", mcpBin)
+		fmt.Printf("    %s `claude` CLI missing — run this later:\n", warnTag())
+		fmt.Printf("      %s\n", cyan(fmt.Sprintf("claude mcp add clawdchan %s -s user", mcpBin)))
 		return nil
 	}
 	// `claude mcp add` returns non-zero if an entry with that name already
@@ -102,7 +105,7 @@ func installCCMCPUser(mcpBin string) error {
 	cmd := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		fmt.Printf("    [ok] MCP → user (%s)\n", mcpBin)
+		fmt.Printf("    %s MCP %s user %s\n", okTag(), dim("→"), dim("("+mcpBin+")"))
 		return nil
 	}
 	if strings.Contains(string(out), "already exists") {
@@ -111,7 +114,7 @@ func installCCMCPUser(mcpBin string) error {
 		if out2, err2 := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user").CombinedOutput(); err2 != nil {
 			return fmt.Errorf("claude mcp add (retry): %w: %s", err2, string(out2))
 		}
-		fmt.Printf("    [ok] MCP → user (updated, %s)\n", mcpBin)
+		fmt.Printf("    %s MCP %s user %s\n", okTag(), dim("→"), dim("(updated, "+mcpBin+")"))
 		return nil
 	}
 	return fmt.Errorf("claude mcp add: %w: %s", err, string(out))
@@ -127,14 +130,14 @@ func installCCMCPProject(mcpBin string) error {
 	}
 	dotMCP := filepath.Join(cwd, ".mcp.json")
 	if data, err := os.ReadFile(dotMCP); err == nil && !strings.Contains(string(data), "clawdchan") {
-		fmt.Printf("  note: %s exists but doesn't include clawdchan. Skipping to avoid overwriting your config.\n", dotMCP)
+		fmt.Printf("    %s %s exists without clawdchan — skipped to avoid overwrite\n", warnTag(), dim(dotMCP))
 		return nil
 	}
 	path, err := writeProjectMCP(cwd, mcpBin)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("    [ok] MCP → %s\n", path)
+	fmt.Printf("    %s MCP %s %s\n", okTag(), dim("→"), dim(path))
 	return nil
 }
 
@@ -161,8 +164,11 @@ func setupClaudeCodePermissions(yes bool, flagScope string) error {
 		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println("    Permissions (without this, clawdchan_* prompts block sub-agents):")
-		fmt.Println("      [1] user (recommended)  [2] project  [3] project-local  [4] skip")
+		fmt.Println("    Permissions " + dim("(without this, clawdchan_* prompts block sub-agents)") + ":")
+		fmt.Printf("      %s user %s\n", cyan("[1]"), green("(recommended)"))
+		fmt.Printf("      %s project %s\n", cyan("[2]"), dim("— checked in, team-wide"))
+		fmt.Printf("      %s project-local %s\n", cyan("[3]"), dim("— personal, gitignored"))
+		fmt.Printf("      %s skip\n", cyan("[4]"))
 		switch promptChoice("    Choice [1]: ", 1, 4) {
 		case 2:
 			scope = "project"
@@ -197,7 +203,7 @@ func setupClaudeCodePermissions(yes bool, flagScope string) error {
 		}
 		settingsPath = filepath.Join(cwd, ".claude", "settings.local.json")
 	case "skip":
-		fmt.Println("    [ok] perm → skipped")
+		fmt.Printf("    %s perm %s %s\n", okTag(), dim("→"), dim("skipped"))
 		return nil
 	default:
 		return fmt.Errorf("unknown -cc-perm-scope %q (use user|project|project-local|skip)", scope)
@@ -208,7 +214,7 @@ func setupClaudeCodePermissions(yes bool, flagScope string) error {
 	}
 	if scope == "project-local" {
 		if err := ensureGitignoreEntry(".claude/settings.local.json"); err != nil {
-			fmt.Printf("    note: update .gitignore manually: %v\n", err)
+			fmt.Printf("    %s update .gitignore manually: %v\n", warnTag(), err)
 		}
 	}
 	return nil
@@ -239,7 +245,7 @@ func mergeAllowRule(settingsPath, rule string) error {
 	allow, _ := perms["allow"].([]any)
 	for _, e := range allow {
 		if s, _ := e.(string); s == rule {
-			fmt.Printf("    [ok] perm → %s (already present)\n", settingsPath)
+			fmt.Printf("    %s perm %s %s %s\n", okTag(), dim("→"), dim(settingsPath), dim("(already present)"))
 			return nil
 		}
 	}
@@ -257,7 +263,7 @@ func mergeAllowRule(settingsPath, rule string) error {
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("    [ok] perm → %s\n", settingsPath)
+	fmt.Printf("    %s perm %s %s\n", okTag(), dim("→"), dim(settingsPath))
 	return nil
 }
 

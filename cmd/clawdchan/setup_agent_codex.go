@@ -44,7 +44,9 @@ func setupCodex(yes bool, scopes map[string]string) error {
 		scope = "user"
 	}
 	if scope == "" {
-		fmt.Println("    MCP (~/.codex/config.toml, user only): [1] user (recommended)  [2] skip")
+		fmt.Println("    MCP scope " + dim("(~/.codex/config.toml — user only)") + ":")
+		fmt.Printf("      %s user %s\n", cyan("[1]"), green("(recommended)"))
+		fmt.Printf("      %s skip\n", cyan("[2]"))
 		switch promptChoice("    Choice [1]: ", 1, 2) {
 		case 2:
 			scope = "skip"
@@ -67,7 +69,7 @@ func setupCodex(yes bool, scopes map[string]string) error {
 		path := filepath.Join(home, ".codex", "config.toml")
 		return mergeCodexMCP(path, mcpBin)
 	case "skip":
-		fmt.Println("    [ok] MCP → skipped")
+		fmt.Printf("    %s MCP %s %s\n", okTag(), dim("→"), dim("skipped"))
 		return nil
 	default:
 		return fmt.Errorf("unknown -codex-mcp-scope %q (use user|skip)", scope)
@@ -109,7 +111,7 @@ func mergeCodexMCP(path, mcpBin string) error {
 	if removed {
 		verb = "updated"
 	}
-	fmt.Printf("    [ok] MCP → %s (%s, approve mode)\n", path, verb)
+	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(path), dim("("+verb+", approve mode)"))
 	return nil
 }
 
