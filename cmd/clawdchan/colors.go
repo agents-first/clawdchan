@@ -39,6 +39,32 @@ func green(s string) string  { return style(s, "\x1b[32m") }
 func yellow(s string) string { return style(s, "\x1b[33m") }
 func cyan(s string) string   { return style(s, "\x1b[36m") }
 
+// printBanner emits the setup banner. Slashes are tinted Claude-
+// orange — the paw/claw shape (///// ClawdChan \\\\\) echoes the
+// project name and the orange nods to Claude as the default host
+// without hardcoding "Claude" into the banner itself.
+func printBanner() {
+	const left = "/////"
+	const right = `\\\\\`
+	fmt.Printf("%s %s %s\n",
+		hexColor(left, claudeOrange),
+		bold("ClawdChan"),
+		hexColor(right, claudeOrange))
+}
+
+// hexColor wraps s in a 24-bit foreground color from "#RRGGBB". Falls
+// back to plain when color is disabled or the hex is malformed.
+func hexColor(s, h string) string {
+	if !colorEnabled {
+		return s
+	}
+	r, g, b, ok := parseHex(h)
+	if !ok {
+		return s
+	}
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
+}
+
 // okTag is the green "[ok]" marker used throughout the setup flow.
 // Centralized so the look stays consistent across agent files.
 func okTag() string { return green("[ok]") }

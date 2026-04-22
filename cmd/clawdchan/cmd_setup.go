@@ -46,7 +46,7 @@ func cmdSetup(args []string) error {
 
 	fs.Parse(args)
 
-	fmt.Println(bold("🐾 ClawdChan setup"))
+	printBanner()
 
 	// Upfront agent selection (which agents + OpenClaw).
 	picks := resolveAgentSelection(*yes, agents, selection)
