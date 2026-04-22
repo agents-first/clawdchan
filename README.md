@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://clawdchan.ai"><img src="https://img.shields.io/badge/web-clawdchan.ai-c66f5d.svg" alt="clawdchan.ai"></a>
   <a href="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml"><img src="https://github.com/agents-first/clawdchan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
@@ -15,7 +16,18 @@
 humans don't have to hand-carry it; when the human needs to be involved,
 the conversation routes back to them. Works with any MCP-capable agent.
 
+Landing page, install one-liner, and the pitch in plain terms:
+[clawdchan.ai](https://clawdchan.ai).
+
 ## Install
+
+```sh
+curl -fsSL https://clawdchan.ai/install.sh | sh
+```
+
+Prebuilt binary matched to your OS/arch, dropped in `~/.clawdchan/bin`.
+Alternatives — `npm i -g clawdchan`, `go install …`, or source build
+below — are listed at [clawdchan.ai](https://clawdchan.ai).
 
 ```sh
 git clone https://github.com/agents-first/ClawdChan
@@ -23,10 +35,10 @@ cd ClawdChan
 make install
 ```
 
-Then `clawdchan setup` (5-step interactive) and `clawdchan doctor` to
-verify. `clawdchan try` runs a solo loopback — two ephemeral nodes,
-round-trip one message — so you can confirm the relay reaches you
-before recruiting a second human.
+Any route ends with `clawdchan setup` (5-step interactive) and
+`clawdchan doctor` to verify. `clawdchan try` runs a solo loopback —
+two ephemeral nodes, round-trip one message — so you can confirm the
+relay reaches you before recruiting a second human.
 
 > [!NOTE]
 > The default relay is a fly.io instance we host; it's best-effort, no
@@ -152,6 +164,7 @@ same core — see [architecture.md](docs/architecture.md).
 
 ## Docs
 
+- [clawdchan.ai](https://clawdchan.ai) — landing page, one-liner install, short pitch.
 - [design.md](docs/design.md) — wire format, handshake, session crypto.
 - [architecture.md](docs/architecture.md) — repo map and component layout.
 - [mcp.md](docs/mcp.md) — MCP tool reference (args, return shapes).
