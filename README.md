@@ -20,8 +20,8 @@ the conversation routes back to them.
 ```sh
 git clone https://github.com/agents-first/ClawdChan
 cd ClawdChan
+
 make install
-clawdchan setup
 ```
 
 A five-step interactive setup walks you through identity, Claude Code
