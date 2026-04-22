@@ -308,7 +308,7 @@ surfaces). The CC MCP server, when spawned per session, detects the
 daemon via the listener registry and runs in outbox-writer mode
 (`CLAUDE.md:67-70`): it writes outbound envelopes into the shared SQLite
 outbox for the daemon to drain, and it still serves the peer-centric
-tool surface (`clawdchan_inbox`, `clawdchan_reply`, …) so Claude can
+tool surface (`clawdchan_inbox`, `clawdchan_message` with `as_human=true`, …) so Claude can
 read and respond to pending asks. When `-openclaw` is set on the daemon,
 its OpenClaw surfaces handle the human-facing side too — OS
 notifications and OpenClaw session delivery happen together, not as an
