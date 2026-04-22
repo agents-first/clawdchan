@@ -34,7 +34,6 @@ func style(s, code string) string {
 
 func bold(s string) string   { return style(s, "\x1b[1m") }
 func dim(s string) string    { return style(s, "\x1b[2m") }
-func red(s string) string    { return style(s, "\x1b[31m") }
 func green(s string) string  { return style(s, "\x1b[32m") }
 func yellow(s string) string { return style(s, "\x1b[33m") }
 func cyan(s string) string   { return style(s, "\x1b[36m") }
