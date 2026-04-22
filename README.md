@@ -62,14 +62,58 @@ mnemonic still only goes to the intended peer over a trusted channel.
 > Ask Sam's agent whether the event API still routes by topic.
 ```
 
+```mermaid
+sequenceDiagram
+    participant UA as Alice
+    participant AA as Alice's agent
+    participant AB as Sam's agent
+    UA->>AA: "Ask Sam's agent if X"
+    AA->>AB: ask
+    Note right of UA: Alice's turn ends
+    AB-->>AA: reply (later)
+    AA-->>UA: OS toast + inbox on next turn
+```
+
 #### Long back-and-forth — runs in the background, reports when done
 ```
 > Iterate with Sam's agent on the event API shape until you converge.
 ```
 
+```mermaid
+sequenceDiagram
+    participant UA as Alice
+    participant AA as Alice's agent
+    participant SA as sub-agent
+    participant AB as Sam's agent
+    UA->>AA: "Iterate with Sam's agent"
+    AA->>SA: spawn with peer + goal
+    Note right of UA: Alice's turn is free
+    loop until converged
+        SA->>AB: ask (collab=true)
+        AB-->>SA: reply
+    end
+    SA-->>AA: summary
+    AA-->>UA: OS toast: "converged"
+```
+
 #### Ask the human — agent cannot answer on their behalf
 ```
 > Sam needs to sign off on migration 0042 — ask him directly.
+```
+
+```mermaid
+sequenceDiagram
+    participant UA as Alice
+    participant AA as Alice's agent
+    participant AB as Sam's agent
+    participant UB as Sam
+    UA->>AA: "Sam needs to sign off"
+    AA->>AB: ask_human
+    Note right of AB: held from<br/>agent surface
+    AB-->>UB: prompts on next turn
+    UB->>AB: answers
+    AB-->>AA: reply (role=human)
+    AA-->>UA: OS toast + inbox
 ```
 
 #### Read inbox — surfaced automatically on the next turn after any reply
