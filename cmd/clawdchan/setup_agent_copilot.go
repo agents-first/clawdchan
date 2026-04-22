@@ -1,0 +1,148 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// copilotAgent wires the github/copilot-cli (agentic) host.
+//
+// Config file: ~/.copilot/mcp-config.json. The official "Add MCP
+// servers" page documents only the user-scope file — it does not
+// describe a project-scope equivalent, so setup exposes user-only.
+//
+// Server entry is shaped:
+//
+//	{ "type": "local", "command": ..., "tools": ["*"] }
+//
+// The "tools" key is the per-server allowlist; "*" is the closest
+// Copilot analog to a trust flag.
+//
+// Reference: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers
+func copilotAgent() *agentWiring {
+	return &agentWiring{
+		key:            "copilot",
+		flagName:       "copilot",
+		displayName:    "GitHub Copilot CLI",
+		defaultOn:      false,
+		scopeFlags:     []string{"mcp"},
+		setup:          setupCopilot,
+		doctorReport:   doctorCopilot,
+		uninstallHints: uninstallHintsCopilot,
+	}
+}
+
+func setupCopilot(yes bool, scopes map[string]string) error {
+	scope := strings.ToLower(strings.TrimSpace(scopes["mcp"]))
+	if scope == "" {
+		if yes || !stdinIsTTY() {
+			fmt.Println("  MCP server registration: defaulting to user scope (pass -copilot-mcp-scope=skip to opt out)")
+			scope = "user"
+		}
+	}
+	if scope == "" {
+		fmt.Println()
+		fmt.Println("  Register clawdchan-mcp for GitHub Copilot CLI?")
+		fmt.Println("    Copilot CLI's documented MCP config is user-scope only: ~/.copilot/mcp-config.json")
+		fmt.Println("    [1] User-wide (recommended)")
+		fmt.Println("    [2] Skip")
+		switch promptChoice("  Choice [1]: ", 1, 2) {
+		case 2:
+			return nil
+		default:
+			scope = "user"
+		}
+	}
+
+	mcpBin, _ := resolveMCPBinary()
+	if mcpBin == "" {
+		return errors.New("clawdchan-mcp not on PATH — run `make install` first, then re-run setup")
+	}
+
+	switch scope {
+	case "user":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(home, ".copilot", "mcp-config.json")
+		return mergeCopilotMCP(path, mcpBin)
+	case "skip":
+		fmt.Println("  Copilot MCP registration: skipped")
+		return nil
+	default:
+		return fmt.Errorf("unknown -copilot-mcp-scope %q (use user|skip)", scope)
+	}
+}
+
+// mergeCopilotMCP merges a clawdchan server entry into Copilot's
+// mcp-config.json, preserving every sibling field. The "tools": ["*"]
+// entry is required — it's both Copilot's per-server allowlist and the
+// "trust everything on this server" mechanism.
+func mergeCopilotMCP(path, mcpBin string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		data = []byte("{}")
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if obj == nil {
+		obj = map[string]any{}
+	}
+	servers, _ := obj["mcpServers"].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+	}
+	servers["clawdchan"] = map[string]any{
+		"type":    "local",
+		"command": mcpBin,
+		"tools":   []any{"*"},
+	}
+	obj["mcpServers"] = servers
+
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  [ok] wrote clawdchan MCP entry (tools=[\"*\"]) to %s\n", path)
+	return nil
+}
+
+func doctorCopilot() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	path := filepath.Join(home, ".copilot", "mcp-config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	if strings.Contains(string(data), `"clawdchan"`) {
+		return []string{"GitHub Copilot CLI: MCP registered (user scope, " + path + ")"}
+	}
+	return nil
+}
+
+func uninstallHintsCopilot() []string {
+	return []string{
+		"If you wired GitHub Copilot CLI, drop the clawdchan entry from:",
+		"  ~/.copilot/mcp-config.json",
+		"Remove the \"clawdchan\" key from the \"mcpServers\" object.",
+	}
+}

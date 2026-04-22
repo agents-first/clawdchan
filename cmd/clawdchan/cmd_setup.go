@@ -22,31 +22,39 @@ import (
 // OpenClaw gateway, and the background daemon.
 //
 // Design intent: never write outside the current project (or to $HOME
-// beyond ~/.clawdchan itself) without an explicit user choice. The user
-// is asked up front which agent(s) to wire and, for each Claude Code
+// beyond ~/.clawdchan itself) without an explicit user choice. The
+// user is asked up front which agent(s) to wire and, for each agent's
 // write, the exact scope — user / project / project-local — before any
 // destination file is touched.
+//
+// The agent surface is registry-driven (see agents.go). Adding a new
+// host means adding an entry to allAgents() plus its setup/doctor/
+// uninstall file; cmd_setup.go stays generic.
 func cmdSetup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
 	yes := fs.Bool("y", false, "assume yes; accept safe defaults (never writes to $HOME without an explicit scope flag)")
-	// Upfront agent selection. Flag wins over interactive prompt.
-	wireCC := fs.String("cc", "", "configure Claude Code integration (yes|no). Default: interactive")
+
+	agents := allAgents()
+	selection, scopes := agentFlags(fs, agents)
+
+	// OpenClaw keeps its own flag surface — it's a gateway, not an MCP
+	// host, so it doesn't fit the agentWiring model.
 	wireOC := fs.String("openclaw", "", "configure OpenClaw gateway (yes|no). Default: interactive")
-	// Scope flags let scripted installers pin the destination up front.
-	ccMCPScope := fs.String("cc-mcp-scope", "", "where to register clawdchan-mcp for Claude Code: user | project | skip")
-	ccPermScope := fs.String("cc-perm-scope", "", "where to write clawdchan_* permission allow-rule: user | project | project-local | skip")
 	openClawURL := fs.String("openclaw-url", "", "OpenClaw gateway URL (ws:// or wss://); pass 'none' to disable")
 	openClawToken := fs.String("openclaw-token", "", "OpenClaw gateway bearer token")
 	openClawDeviceID := fs.String("openclaw-device-id", "", "OpenClaw device id (default: clawdchan-daemon)")
+
 	fs.Parse(args)
 
 	fmt.Println("🐾 ClawdChan setup")
 
-	// Upfront agent selection.
-	wantCC, wantOC := resolveAgentSelection(*yes, *wireCC, *wireOC)
+	// Upfront agent selection (which agents + OpenClaw).
+	picks := resolveAgentSelection(*yes, agents, selection)
+	wantOC := resolveOpenClawSelection(*yes, *wireOC)
 
-	// warnings accumulate non-fatal issues from steps 2-5 so we surface
-	// them together at the end and nudge toward `clawdchan doctor`.
+	// warnings accumulate non-fatal issues from later steps so we
+	// surface them together at the end and nudge toward
+	// `clawdchan doctor`.
 	var warnings []string
 
 	// Step 1: identity + config. If config already exists, offer to
@@ -73,21 +81,28 @@ func cmdSetup(args []string) error {
 		}
 	}
 
-	// Step 2: Claude Code wiring — MCP server registration + permissions.
-	// Both are scope-prompted; the user sees the exact destination file
-	// before anything is written.
-	stepHeader(2, "Claude Code")
-	if wantCC {
-		if err := setupClaudeCodeMCP(*yes, *ccMCPScope); err != nil {
-			fmt.Printf("  note: Claude Code MCP wiring: %v\n", err)
-			warnings = append(warnings, fmt.Sprintf("CC MCP: %v", err))
+	// Step 2: per-agent wiring. Each selected agent owns its own
+	// MCP/permissions sub-prompts. Agents the user didn't pick are
+	// silently skipped.
+	stepHeader(2, "Agent wiring")
+	anyAgent := false
+	for _, a := range agents {
+		if !picks[a.key] {
+			continue
 		}
-		if err := setupClaudeCodePermissions(*yes, *ccPermScope); err != nil {
-			fmt.Printf("  note: Claude Code permissions: %v\n", err)
-			warnings = append(warnings, fmt.Sprintf("CC permissions: %v", err))
+		anyAgent = true
+		fmt.Printf("  — %s\n", a.displayName)
+		flatScopes := map[string]string{}
+		for scope, ptr := range scopes[a.key] {
+			flatScopes[scope] = *ptr
 		}
-	} else {
-		fmt.Println("  (skipped — agent selection excluded Claude Code)")
+		if err := a.setup(*yes, flatScopes); err != nil {
+			fmt.Printf("    note: %s: %v\n", a.displayName, err)
+			warnings = append(warnings, fmt.Sprintf("%s: %v", a.displayName, err))
+		}
+	}
+	if !anyAgent {
+		fmt.Println("  (no agents selected)")
 	}
 
 	// Step 3: PATH wiring.
@@ -128,9 +143,18 @@ func cmdSetup(args []string) error {
 	} else {
 		fmt.Println("✅ Setup complete. Next:")
 	}
-	if wantCC {
-		fmt.Println("  1. Restart Claude Code so it loads the MCP server.")
-		fmt.Println(`  2. Ask Claude: "pair me with <friend> via clawdchan."`)
+	if picks["cc"] {
+		fmt.Println("  - Restart Claude Code so it loads the MCP server.")
+		fmt.Println(`    Ask Claude: "pair me with <friend> via clawdchan."`)
+	}
+	if picks["gemini"] {
+		fmt.Println("  - Restart Gemini CLI so it loads the new MCP server entry.")
+	}
+	if picks["codex"] {
+		fmt.Println("  - Restart Codex so it re-reads ~/.codex/config.toml.")
+	}
+	if picks["copilot"] {
+		fmt.Println("  - Restart GitHub Copilot CLI so it re-reads ~/.copilot/mcp-config.json.")
 	}
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
 		fmt.Println("  - OpenClaw config changed — restart the daemon to pick it up:")
@@ -149,289 +173,111 @@ func cmdSetup(args []string) error {
 	return nil
 }
 
-// stepHeader prints a visual break + numbered title between setup stages.
+// stepHeader prints a visual break + numbered title between setup
+// stages. Total step count is fixed at 5 regardless of which agents
+// the user picked.
 func stepHeader(n int, title string) {
 	fmt.Println()
 	fmt.Printf("Step %d of 5 — %s\n", n, title)
 }
 
-// resolveAgentSelection decides which agents the setup flow wires. Flag
-// values win; otherwise we prompt when a TTY is available, and default
-// to Claude Code only (the most common case) for -y / non-TTY runs.
-func resolveAgentSelection(yes bool, flagCC, flagOC string) (cc, oc bool) {
-	parseBool := func(s string, dflt bool) bool {
-		switch strings.ToLower(strings.TrimSpace(s)) {
-		case "yes", "y", "true", "1", "on":
-			return true
-		case "no", "n", "false", "0", "off":
-			return false
-		default:
-			return dflt
+// resolveAgentSelection decides which agents the setup flow wires.
+// Per-agent flag values win; otherwise we prompt for a multi-select
+// list when a TTY is available, and in -y / non-TTY mode fall back to
+// each agent's defaultOn (today: Claude Code only).
+func resolveAgentSelection(yes bool, agents []*agentWiring, selection map[string]*string) map[string]bool {
+	picks := map[string]bool{}
+	anyFlagSet := false
+	for _, a := range agents {
+		if *selection[a.key] != "" {
+			anyFlagSet = true
+			break
 		}
 	}
-
-	ccFlagSet := flagCC != ""
-	ocFlagSet := flagOC != ""
-	if ccFlagSet || ocFlagSet || yes || !stdinIsTTY() {
-		return parseBool(flagCC, true), parseBool(flagOC, false)
+	if anyFlagSet || yes || !stdinIsTTY() {
+		for _, a := range agents {
+			picks[a.key] = parseBoolFlag(*selection[a.key], a.defaultOn)
+		}
+		return picks
 	}
 
 	fmt.Println()
 	fmt.Println("Which agents do you want to wire ClawdChan for?")
-	fmt.Println("  [1] Claude Code only (default)")
-	fmt.Println("  [2] OpenClaw only")
-	fmt.Println("  [3] Both")
-	fmt.Println("  [4] None — just identity, PATH, and the daemon")
-	switch promptChoice("Choice [1]: ", 1, 4) {
-	case 2:
-		return false, true
-	case 3:
-		return true, true
-	case 4:
-		return false, false
-	default:
-		return true, false
+	for i, a := range agents {
+		marker := " "
+		if a.defaultOn {
+			marker = "*"
+		}
+		fmt.Printf("  [%d]%s %s\n", i+1, marker, a.displayName)
 	}
+	fmt.Println("  [0]  None of these (just identity, PATH, and the daemon)")
+	fmt.Println("       Enter comma-separated numbers (e.g. 1,3), or press Enter for defaults (*).")
+	line := promptLine("Choice: ")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		for _, a := range agents {
+			picks[a.key] = a.defaultOn
+		}
+		return picks
+	}
+	if line == "0" {
+		for _, a := range agents {
+			picks[a.key] = false
+		}
+		return picks
+	}
+	for _, tok := range strings.Split(line, ",") {
+		tok = strings.TrimSpace(tok)
+		for i, a := range agents {
+			if tok == fmt.Sprintf("%d", i+1) {
+				picks[a.key] = true
+			}
+		}
+	}
+	return picks
 }
 
-// setupClaudeCodeMCP asks where to register the clawdchan MCP server
-// for Claude Code, then performs that write. The three scopes are:
-//
-//   - user:    ~/.claude.json via `claude mcp add -s user` — one-time
-//     registration visible in every CC session on this machine
-//   - project: .mcp.json in the current directory — visible only in CC
-//     sessions opened from here; checked in with the project
-//   - skip:    do nothing; user can register manually later
-//
-// In -y / non-TTY mode, absent an explicit -cc-mcp-scope flag, we
-// default to "user" — the same choice the interactive flow recommends
-// and the only one that produces a working install without further
-// action. Pass -cc-mcp-scope=skip to opt out.
-func setupClaudeCodeMCP(yes bool, flagScope string) error {
-	scope := strings.ToLower(strings.TrimSpace(flagScope))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  MCP server registration: defaulting to user scope (pass -cc-mcp-scope=skip to opt out)")
-			scope = "user"
-		}
+// resolveOpenClawSelection decides whether to run the OpenClaw step.
+// In -y / non-TTY mode OpenClaw stays off unless -openclaw=yes is
+// explicit. Interactive TTY runs get a yes/no prompt (default no).
+func resolveOpenClawSelection(yes bool, flagOC string) bool {
+	if flagOC != "" {
+		return parseBoolFlag(flagOC, false)
 	}
-	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Where should Claude Code find the clawdchan-mcp server?")
-		fmt.Println("    [1] User-wide (recommended) — registers once via `claude mcp add -s user`; available in every CC session")
-		fmt.Println("    [2] This project only — writes .mcp.json in the current directory")
-		fmt.Println("    [3] Skip — register manually later")
-		switch promptChoice("  Choice [1]: ", 1, 3) {
-		case 2:
-			scope = "project"
-		case 3:
-			return nil
-		default:
-			scope = "user"
-		}
+	if yes || !stdinIsTTY() {
+		return false
 	}
-
-	mcpBin, _ := resolveMCPBinary()
-	if mcpBin == "" {
-		return errors.New("clawdchan-mcp not on PATH — run `make install` first, then re-run setup")
-	}
-
-	switch scope {
-	case "user":
-		return installCCMCPUser(mcpBin)
-	case "project":
-		return installCCMCPProject(mcpBin)
-	case "skip":
-		fmt.Println("  MCP server registration: skipped")
-		return nil
-	default:
-		return fmt.Errorf("unknown -cc-mcp-scope %q (use user|project|skip)", scope)
-	}
+	ok, _ := promptYN("Configure the optional OpenClaw gateway? [y/N]: ", false)
+	return ok
 }
 
-// installCCMCPUser registers clawdchan-mcp user-wide via the `claude`
-// CLI. We prefer shelling out to the CLI over editing ~/.claude.json
-// directly — that file holds arbitrary user state and a bad merge could
-// corrupt settings unrelated to ClawdChan.
-func installCCMCPUser(mcpBin string) error {
-	claudeCLI, err := exec.LookPath("claude")
+func promptLine(prompt string) string {
+	fmt.Print(prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		fmt.Println("  User-wide MCP registration needs the `claude` CLI. Run this when you have it available:")
-		fmt.Printf("      claude mcp add clawdchan %s -s user\n", mcpBin)
-		return nil
+		return ""
 	}
-	// `claude mcp add` returns non-zero if an entry with that name already
-	// exists. Try add first, then retry with remove+add to update the path.
-	cmd := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		fmt.Printf("  [ok] registered clawdchan MCP server user-wide (%s)\n", mcpBin)
-		return nil
-	}
-	if strings.Contains(string(out), "already exists") {
-		// Re-register to update the path in case the user reinstalled.
-		_ = exec.Command(claudeCLI, "mcp", "remove", "clawdchan", "-s", "user").Run()
-		if out2, err2 := exec.Command(claudeCLI, "mcp", "add", "clawdchan", mcpBin, "-s", "user").CombinedOutput(); err2 != nil {
-			return fmt.Errorf("claude mcp add (retry): %w: %s", err2, string(out2))
-		}
-		fmt.Printf("  [ok] updated clawdchan MCP server user-wide (%s)\n", mcpBin)
-		return nil
-	}
-	return fmt.Errorf("claude mcp add: %w: %s", err, string(out))
+	return line
 }
 
-// installCCMCPProject writes .mcp.json in the current directory. If a
-// .mcp.json exists and doesn't mention clawdchan we leave it alone
-// rather than stomping unrelated config.
-func installCCMCPProject(mcpBin string) error {
-	cwd, err := os.Getwd()
+// promptChoice reads a 1..max integer from stdin with a default on
+// empty / invalid input. Returns the chosen integer.
+func promptChoice(prompt string, defaultChoice, max int) int {
+	fmt.Print(prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		return err
+		return defaultChoice
 	}
-	dotMCP := filepath.Join(cwd, ".mcp.json")
-	if data, err := os.ReadFile(dotMCP); err == nil && !strings.Contains(string(data), "clawdchan") {
-		fmt.Printf("  note: %s exists but doesn't include clawdchan. Skipping to avoid overwriting your config.\n", dotMCP)
-		return nil
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return defaultChoice
 	}
-	path, err := writeProjectMCP(cwd, mcpBin)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("  [ok] wrote %s — restart Claude Code to pick up the new MCP server.\n", path)
-	return nil
-}
-
-// setupClaudeCodePermissions adds an allow-rule for the clawdchan MCP
-// server (`mcp__clawdchan`, a server-level prefix that covers every
-// tool) to a Claude Code settings file. Without this every clawdchan_*
-// call triggers a per-call permission prompt; sub-agents driving live
-// collab can't answer those prompts and silently fail.
-//
-// Scopes:
-//
-//   - user:          ~/.claude/settings.json — applies to every CC session
-//   - project:       .claude/settings.json in cwd — checked in, team-wide
-//   - project-local: .claude/settings.local.json — personal, gitignored
-//   - skip:          leave per-call prompts in place
-//
-// In -y / non-TTY mode, absent an explicit -cc-perm-scope flag, we
-// default to "user" so the clawdchan_* allow-rule is in place for
-// every CC session. Without it, per-call prompts block live-collab
-// sub-agents. Pass -cc-perm-scope=skip to opt out.
-func setupClaudeCodePermissions(yes bool, flagScope string) error {
-	scope := strings.ToLower(strings.TrimSpace(flagScope))
-	if scope == "" {
-		if yes || !stdinIsTTY() {
-			fmt.Println("  Permissions: defaulting to user scope (pass -cc-perm-scope=skip to opt out)")
-			scope = "user"
+	for i := 1; i <= max; i++ {
+		if s == fmt.Sprintf("%d", i) {
+			return i
 		}
 	}
-	if scope == "" {
-		fmt.Println()
-		fmt.Println("  Where should the clawdchan_* allow-rule go?")
-		fmt.Println("    Without this rule, every clawdchan_* tool call prompts in Claude Code")
-		fmt.Println("    — which blocks live-collab sub-agents that can't answer prompts.")
-		fmt.Println("    [1] User settings (recommended) — ~/.claude/settings.json; every CC session")
-		fmt.Println("    [2] Project settings — .claude/settings.json; checked in, team-wide")
-		fmt.Println("    [3] Project-local — .claude/settings.local.json; personal, gitignored")
-		fmt.Println("    [4] Skip")
-		switch promptChoice("  Choice [1]: ", 1, 4) {
-		case 2:
-			scope = "project"
-		case 3:
-			scope = "project-local"
-		case 4:
-			return nil
-		default:
-			scope = "user"
-		}
-	}
-
-	const rule = "mcp__clawdchan"
-	var settingsPath string
-	switch scope {
-	case "user":
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		settingsPath = filepath.Join(home, ".claude", "settings.json")
-	case "project":
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		settingsPath = filepath.Join(cwd, ".claude", "settings.json")
-	case "project-local":
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		settingsPath = filepath.Join(cwd, ".claude", "settings.local.json")
-	case "skip":
-		fmt.Println("  Permissions: skipped")
-		return nil
-	default:
-		return fmt.Errorf("unknown -cc-perm-scope %q (use user|project|project-local|skip)", scope)
-	}
-
-	if err := mergeAllowRule(settingsPath, rule); err != nil {
-		return err
-	}
-	if scope == "project-local" {
-		if err := ensureGitignoreEntry(".claude/settings.local.json"); err != nil {
-			fmt.Printf("  note: could not update .gitignore automatically: %v\n", err)
-			fmt.Println("  Add `.claude/settings.local.json` to your .gitignore manually.")
-		}
-	}
-	return nil
-}
-
-// mergeAllowRule adds rule to settings.permissions.allow if absent.
-// Reads the existing JSON (if any), preserves every sibling field, and
-// writes the result back. Missing parent dirs are created.
-func mergeAllowRule(settingsPath, rule string) error {
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		data = []byte("{}")
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("parse %s: %w", settingsPath, err)
-	}
-	if obj == nil {
-		obj = map[string]any{}
-	}
-	perms, _ := obj["permissions"].(map[string]any)
-	if perms == nil {
-		perms = map[string]any{}
-	}
-	allow, _ := perms["allow"].([]any)
-	for _, e := range allow {
-		if s, _ := e.(string); s == rule {
-			fmt.Printf("  [ok] %q already allowed in %s\n", rule, settingsPath)
-			return nil
-		}
-	}
-	allow = append(allow, rule)
-	perms["allow"] = allow
-	obj["permissions"] = perms
-
-	out, err := json.MarshalIndent(obj, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o644); err != nil {
-		return err
-	}
-	fmt.Printf("  [ok] added %q to %s\n", rule, settingsPath)
-	return nil
+	return defaultChoice
 }
 
 // ensureGitignoreEntry adds entry to the current repo's .gitignore if
@@ -463,26 +309,6 @@ func ensureGitignoreEntry(entry string) error {
 		fmt.Printf("  [ok] added %s to .gitignore\n", entry)
 	}
 	return err
-}
-
-// promptChoice reads a 1..max integer from stdin with a default on
-// empty / invalid input. Returns the chosen integer.
-func promptChoice(prompt string, defaultChoice, max int) int {
-	fmt.Print(prompt)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil {
-		return defaultChoice
-	}
-	s := strings.TrimSpace(line)
-	if s == "" {
-		return defaultChoice
-	}
-	for i := 1; i <= max; i++ {
-		if s == fmt.Sprintf("%d", i) {
-			return i
-		}
-	}
-	return defaultChoice
 }
 
 // setupOpenClaw wires the optional OpenClaw gateway. Flags override
