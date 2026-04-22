@@ -13,6 +13,24 @@
   --radius: 12px;
   --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1714;
+    --bg-card: #26201c;
+    --ink: #f1e8d6;
+    --ink-soft: #aea393;
+    --mint: #7db9a0;
+    --mint-deep: #9fd4bb;
+    --coral: #e89b8c;
+    --coral-deep: #f2b3a4;
+    --border: #3a312a;
+    --code-bg: #0f0c0a;
+    --code-ink: #f1e8d6;
+  }
+  .banner { filter: brightness(0.92) saturate(0.9); }
 }
 
 * { box-sizing: border-box; }
