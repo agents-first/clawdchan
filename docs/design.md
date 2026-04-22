@@ -255,20 +255,20 @@ Policy is per-node, edited by the human, not by the remote.
 
 ### Claude Code
 
-Two install modes, same protocol:
-
-- **Mode A (plugin-only).** Core runs in-process inside the CC plugin.
-  Receive only while a CC session is open; envelopes for offline users wait
-  at the relay (up to the retention window). One-step install.
-- **Mode B (plugin + daemon).** A `clawdchand` LaunchAgent/systemd user unit
-  owns identity, store, and transport; the CC plugin is a thin client over a
-  local Unix socket. Always-on receive; CC still provides the human surface
-  when the user opens it. Two-step install (plugin + `clawdchan daemon install`).
-
-Both modes expose the same MCP tools: `list_peers`, `pair`, `consume`,
-`open_thread`, `send`, `poll`, `get_thread`. `AskHuman` surfaces as a prompt in
-the next CC turn. Identity lives under `~/.clawdchan/` so the daemon and plugin
-share state with any future OpenClaw binding on the same machine.
+The MCP server (`clawdchan-mcp`) runs per-session over stdio and exposes four
+tools: `clawdchan_toolkit` (state + paired peers), `clawdchan_pair`
+(generate/consume mnemonic), `clawdchan_message` (send; `as_human=true` answers
+a standing `ask_human`, `collab=true` marks a live-exchange invite),
+`clawdchan_inbox` (cursor-based read; with `peer_id` + `wait_seconds` up to 60
+it's the live-collab await primitive). Ambient inbound delivery (OS toasts)
+comes from a separate `clawdchan daemon` process installed as a LaunchAgent /
+systemd user unit. When the daemon is running it owns the relay link; the
+per-session MCP server defers to it via a listener registry and writes
+outbound to the shared SQLite outbox for the daemon to drain. `AskHuman`
+surfaces on the user's next CC turn via the `pending_asks` field on
+`clawdchan_inbox`. Identity lives under `~/.clawdchan/` so the daemon, MCP
+server, and CLI share state with any future OpenClaw binding on the same
+machine.
 
 ### OpenClaw
 

@@ -14,8 +14,8 @@ Status: **done.**
   outbox)
 - `core/policy` — minimal allowlist / revoke gate
 - `core/surface` — HumanSurface / AgentSurface contracts + Nop defaults
-- `core/node` — wired entrypoint with pair / consume / open / send / poll /
-  subscribe / submit_human_reply
+- `core/node` — wired entrypoint with pair / consume / open / send /
+  subscribe / submit_human_reply (inbox is cursor-based, not poll-based)
 - `internal/relayserver` — reference relay: `/link`, `/pair`, `/healthz`
 - `cmd/clawdchan` — CLI: init / whoami / pair / consume / peers / threads /
   open / send / listen / inspect
@@ -32,17 +32,22 @@ Status: **done.**
 - `hosts/claudecode/plugin/` — `.mcp.json` + plugin manifest +
   `commands/clawdchan.md`
 
-Tool surface (peer-centric, v0.2): `clawdchan_toolkit`, `_whoami`, `_peers`,
-`_pair`, `_consume`, `_message`, `_inbox`, `_reply`, `_decline`. Thread IDs
-are not exposed — the host resolves peer→thread internally.
+Tool surface (collapsed to 4 tools): `clawdchan_toolkit` (state + paired
+peers), `clawdchan_pair` (generate/consume mnemonic), `clawdchan_message`
+(send; `as_human=true` answers a standing ask, `collab=true` marks a
+live-exchange invite), `clawdchan_inbox` (cursor-based read; with `peer_id`
++ `wait_seconds` up to 60 it's the live-collab await primitive). Thread IDs
+are not exposed — the host resolves peer→thread internally. Destructive /
+per-peer ops (rename, revoke, remove) are CLI-only.
 
 CC host is reactive: remote `AskHuman` is stored and surfaced on the user's
 next CC turn via `clawdchan_inbox`'s `pending_asks` field. The MCP server
 surfaces the content there specifically so Claude can present it to the
 user; it is omitted from the main envelopes list until answered. Only
-`_reply` (with the user's words, sent as role=human) or `_decline` closes
-the ask. For ambient OS-level notifications, Phase 1.5 is now shipped —
-`clawdchan daemon`.
+`clawdchan_message(..., as_human=true)` closes the ask — with the user's
+literal words to reply, or `text="[declined] <reason>"` to decline. For
+ambient OS-level notifications, Phase 1.5 is now shipped — `clawdchan
+daemon`.
 
 Install-time ergonomics: `clawdchan init -write-mcp <dir>` drops a
 `.mcp.json` pre-wired to the absolute `clawdchan-mcp` path; `clawdchan
@@ -50,8 +55,7 @@ doctor` validates binary, config, identity, and relay in one shot.
 
 ## Phase 1.5 — Always-on daemon (shipped as v0.2)
 
-Status: **done** for the background-service part; UserPromptSubmit hook
-still pending.
+Status: **done.**
 
 - `clawdchan daemon run` holds the relay link, drains the outbox,
   classifies inbound (new session vs. continuation), and fires native OS
@@ -67,10 +71,6 @@ still pending.
   relay connect when a daemon is present — writes outbound to the shared
   SQLite outbox for the daemon to drain (up to 10s tick). Falls back to
   owning the relay link when no daemon is present.
-- Still TODO: UserPromptSubmit hook that reads the store and injects an
-  inbox digest into Claude's context on each turn, so the agent sees new
-  traffic without needing to call `clawdchan_inbox` explicitly.
-
 ## Phase 2 — OpenClaw host (shipped)
 
 Status: **done.**
@@ -102,8 +102,9 @@ Code. No TypeScript plugin or OpenClaw-side code required.
 
 Coexistence with Claude Code: CC config is never removed or replaced.
 The daemon owns the node; the CC MCP server continues to run per-session
-in outbox-writer mode and keeps serving `clawdchan_inbox` / `_reply` /
-`_decline`, so a user can run both surfaces at once.
+in outbox-writer mode and keeps serving `clawdchan_inbox` and
+`clawdchan_message` (including `as_human=true` replies), so a user can run
+both surfaces at once.
 
 ## Phase 3 — Follow-ups (deferred)
 
