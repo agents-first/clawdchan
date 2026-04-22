@@ -1,9 +1,9 @@
 //go:build windows
 
 package main
-
 import (
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/agents-first/ClawdChan/core/notify"
@@ -25,6 +25,12 @@ func registerWindowsAppID() error {
 	if out, err := exec.Command("reg", "add", key,
 		"/v", "ShowInSettings", "/t", "REG_DWORD", "/d", "1", "/f").CombinedOutput(); err != nil {
 		return fmt.Errorf("reg add ShowInSettings: %w: %s", err, string(out))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if out, err := exec.Command("reg", "add", key,
+			"/v", "IconUri", "/t", "REG_SZ", "/d", exe, "/f").CombinedOutput(); err != nil {
+			return fmt.Errorf("reg add IconUri: %w: %s", err, string(out))
+		}
 	}
 	return nil
 }
