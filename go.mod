@@ -1,11 +1,11 @@
 module github.com/agents-first/clawdchan
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/mark3labs/mcp-go v0.48.0
+	github.com/mark3labs/mcp-go v0.49.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.50.0
