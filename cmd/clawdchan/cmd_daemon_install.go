@@ -426,14 +426,14 @@ func daemonUninstall(_ []string) error {
 		return nil
 	case "windows":
 		_ = exec.Command("schtasks", "/End", "/TN", windowsTaskName).Run()
-		
+
 		// Use /Query to check if the task exists without relying on English-only error strings.
 		if exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run() != nil {
 			fmt.Println("not installed")
 			_ = unregisterWindowsAppID()
 			return nil
 		}
-		
+
 		out, err := exec.Command("schtasks", "/Delete", "/TN", windowsTaskName, "/F").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("schtasks /Delete: %w: %s", err, string(out))
