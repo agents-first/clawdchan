@@ -1,0 +1,296 @@
+:root {
+  --bg: #f6efe3;
+  --bg-card: #fbf6ec;
+  --ink: #2d2a26;
+  --ink-soft: #645e56;
+  --mint: #8fc7b0;
+  --mint-deep: #4f9c7e;
+  --coral: #e89b8c;
+  --coral-deep: #c66f5d;
+  --border: #e6dcc7;
+  --code-bg: #2d2a26;
+  --code-ink: #f6efe3;
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+a {
+  color: var(--coral-deep);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color .15s ease;
+}
+a:hover { border-bottom-color: var(--coral-deep); }
+
+code {
+  font-family: var(--mono);
+  font-size: .92em;
+}
+p code, .next code {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+pre {
+  margin: 0;
+  padding: 16px 18px;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+
+/* Hero */
+.hero { text-align: center; }
+.banner {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+}
+.hero h1 {
+  font-size: 44px;
+  line-height: 1.1;
+  margin: 0 0 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.lede {
+  max-width: 560px;
+  margin: 0 auto 28px;
+  color: var(--ink-soft);
+  font-size: 18px;
+  text-align: left;
+}
+.next {
+  margin: 20px auto 28px;
+  max-width: 560px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  text-align: left;
+}
+
+/* Install block */
+.install {
+  text-align: left;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.tabs button {
+  background: transparent;
+  border: 0;
+  padding: 8px 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color .15s, border-color .15s;
+}
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--coral-deep);
+}
+.panel {
+  position: relative;
+  display: none;
+}
+.panel.active { display: block; }
+.panel pre { padding-right: 72px; }
+.copy {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: rgba(255,255,255,.08);
+  color: var(--code-ink);
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.copy:hover { background: rgba(255,255,255,.16); }
+.copy.done { background: var(--mint-deep); border-color: var(--mint-deep); color: #fff; }
+
+/* CTA */
+.cta {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 28px;
+  flex-wrap: wrap;
+}
+.cta a {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--ink);
+}
+.cta a.primary {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+.cta a:hover { border-color: var(--ink); }
+
+/* Flows */
+.flows { margin-top: 88px; }
+.flows h2 {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 28px;
+}
+.cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.cards article {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+}
+.cards h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.cards p {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 15px;
+}
+.cards pre { font-size: 13px; padding: 12px 14px; }
+.cards article:nth-child(1) { border-left: 3px solid var(--mint); }
+.cards article:nth-child(2) { border-left: 3px solid var(--coral); }
+.cards article:nth-child(3) { border-left: 3px solid var(--mint-deep); }
+
+/* Why */
+.why {
+  margin-top: 88px;
+}
+.why h2 {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 20px;
+}
+.why > p {
+  max-width: 640px;
+  margin: 0 auto 24px;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.65;
+}
+.why em {
+  font-style: italic;
+  color: var(--coral-deep);
+}
+.tenets {
+  list-style: none;
+  padding: 0;
+  margin: 0 auto;
+  max-width: 640px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 20px;
+}
+.tenets li {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+.tenets li strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.why .more {
+  text-align: center;
+  margin: 22px 0 0;
+  font-size: 14px;
+}
+
+/* Scope */
+.scope {
+  margin-top: 72px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+.scope h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.scope p { margin: 0; color: var(--ink); font-size: 15px; }
+
+/* Footer */
+footer {
+  margin-top: 88px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  color: var(--ink-soft);
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .hero h1 { font-size: 34px; }
+  .scope { grid-template-columns: 1fr; gap: 20px; }
+  .tenets { grid-template-columns: 1fr; gap: 10px; }
+  main { padding: 32px 18px 48px; }
+}

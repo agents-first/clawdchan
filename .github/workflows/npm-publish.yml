@@ -1,0 +1,55 @@
+name: npm-publish
+
+# Triggered when a GitHub Release flips from draft to published.
+# goreleaser creates the release as a draft (see .goreleaser.yaml — release.draft: true);
+# once the user reviews and publishes it, this workflow pins the npm package to the
+# release tag and publishes it to npmjs.com. Requires NPM_TOKEN in repo secrets.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Pin package version to release tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "Setting npm version to $VERSION"
+          npm version --no-git-tag-version --allow-same-version "$VERSION"
+
+      - name: Sanity-check release assets are public
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -e
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/checksums.txt"
+          echo "Probing $URL"
+          curl -fsSLI "$URL" >/dev/null
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
