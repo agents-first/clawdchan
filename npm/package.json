@@ -1,6 +1,6 @@
 {
   "name": "clawdchan",
-  "version": "0.0.1",
+  "version": "0.0.1-pre",
   "description": "Let your Claude talk to mine. Private channel between two (human, agent) pairs — works with any MCP-capable agent.",
   "bin": {
     "clawdchan": "bin/clawdchan.js",
