@@ -95,6 +95,7 @@ html, body {
   font-size: 17px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 main {
@@ -132,7 +133,9 @@ pre {
   font-size: 14px;
   line-height: 1.5;
   overflow-x: auto;
+  max-width: 100%;
 }
+pre code { white-space: pre; }
 pre code { background: transparent; border: 0; padding: 0; color: inherit; }
 
 /* Hero */
@@ -371,6 +374,11 @@ footer {
 
 @media (max-width: 560px) {
   .hero h1 { font-size: 34px; }
+  /* On narrow screens, wrap long command lines rather than forcing
+     horizontal scroll. Keeps the card (and the whole page) fitting
+     the viewport. */
+  .cards pre code,
+  .panel pre code { white-space: pre-wrap; word-break: break-word; }
   .tenets { grid-template-columns: 1fr; gap: 10px; }
   main { padding: 32px 18px 48px; }
 }
