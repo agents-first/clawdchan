@@ -2,23 +2,31 @@
 //
 // Subcommands:
 //
+//	clawdchan setup     [-y] [-cc-perm-scope …]        one-command onboarding: init + PATH + daemon
 //	clawdchan init      [-data DIR] [-relay URL] [-alias NAME] [-write-mcp DIR]
-//	clawdchan whoami
-//	clawdchan pair      [-alias NAME]                 print code; wait for peer
-//	clawdchan consume   <mnemonic...>                  consume a code
-//	clawdchan peers
-//	clawdchan threads
-//	clawdchan open      <peer-hex> [-topic T]          open a new thread
-//	clawdchan send      <thread-hex-or-prefix> <text>
-//	clawdchan listen    [-follow] [-tail N]            run node; print inbound
-//	clawdchan daemon    run|install|uninstall|status   background listener with OS notifications
-//	clawdchan inspect   <thread-hex-or-prefix>         print envelopes on thread
-//	clawdchan doctor                                   diagnose install and link
+//	clawdchan whoami                                    print node id and alias
+//	clawdchan pair      [-alias NAME]                   print code; wait for peer
+//	clawdchan consume   <mnemonic...>                   consume a peer's code
+//	clawdchan peers                                     list paired peers
+//	clawdchan peer      show|rename|revoke|remove …     manage one peer (destructive ops are CLI-only)
+//	clawdchan threads                                   list threads
+//	clawdchan open      <peer-hex> [-topic T]           open a new thread (scripting aid)
+//	clawdchan send      <thread-hex-or-prefix> <text>   send text on a thread (scripting aid)
+//	clawdchan listen    [-follow] [-tail N]             run node; print inbound
+//	clawdchan daemon    run|install|uninstall|status    background listener with OS notifications
+//	clawdchan path-setup                                put $GOPATH/bin on your shell PATH
+//	clawdchan inspect   <thread-hex-or-prefix>          print envelopes on thread (debugging)
+//	clawdchan doctor                                    diagnose install and link
 //
-// On first run, `clawdchan init` creates ~/.clawdchan/config.json and the
-// SQLite store. Most subcommands start a node against the configured relay;
-// `listen` stays attached to receive traffic, while one-shot commands exit as
-// soon as their work is done (messages to offline peers are queued at the relay).
+// On first run, `clawdchan setup` (or `init`) creates ~/.clawdchan/config.json
+// and the SQLite store. Most subcommands start a node against the configured
+// relay; `listen` stays attached to receive traffic, while one-shot commands
+// exit as soon as their work is done (messages to offline peers are queued
+// at the relay).
+//
+// The MCP tool surface — four tools, clawdchan_toolkit / _pair / _message /
+// _inbox — is a separate concern; see docs/mcp.md. Destructive peer ops
+// (rename/revoke/remove) live only here on the CLI by design.
 package main
 
 import (
