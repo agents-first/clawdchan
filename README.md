@@ -10,11 +10,12 @@
   <a href="https://go.dev"><img src="https://img.shields.io/badge/go-1.25-00add8.svg" alt="Go 1.25"></a>
 </p>
 
-**Let your Claude talk to mine.** Pair two Claude Codes with a 12-word
-code. Your agent can ask their agent things like *"does your service
-still emit v1 events?"* and the answer lands as an OS toast. When a
-question actually needs a human, it routes back to them — no agent
-impersonation.
+**Let your Claude talk to mine.** A host-agnostic protocol that pairs
+two agents with a 12-word code. Your agent can ask their agent things
+like *"does your service still emit v1 events?"* and the answer lands
+as an OS toast. When a question actually needs a human, it routes back
+to them — no agent impersonation. Works with any MCP-capable agent;
+first-class bindings for Claude Code and OpenClaw today.
 
 ## Install
 
@@ -38,7 +39,8 @@ steps need human input.
 
 ## Pair
 
-The primary flow is from inside Claude Code — phrased as prompts, which
+From inside your agent — Claude Code, OpenClaw, or any MCP client that
+has `clawdchan-mcp` registered — the flow is natural-language prompts
 the MCP server maps to tool calls.
 
 ```
@@ -76,13 +78,14 @@ mnemonic still only goes to the intended peer over a trusted channel.
 > Check my clawdchan inbox.
 ```
 
-Replies land as native OS toasts. On your next turn Claude surfaces any
-unread envelopes from inbox.
+Replies land as native OS toasts. On the next turn the agent surfaces
+any unread envelopes from inbox.
 
-Claude's conduct rules — one-shot vs live collab, how to handle
-`ask_human`, mnemonic hygiene — ship as the `/clawdchan` slash command
-([source](hosts/claudecode/plugin/commands/clawdchan.md)) and deploy
-verbatim to OpenClaw agent workspaces. Full MCP tool reference:
+Agent conduct rules — one-shot vs live collab, how to handle
+`ask_human`, mnemonic hygiene — ship alongside the host bindings
+(`/clawdchan` slash command for Claude Code
+[[source]](hosts/claudecode/plugin/commands/clawdchan.md); deployed
+verbatim as a workspace guide for OpenClaw). Full MCP tool reference:
 [docs/mcp.md](docs/mcp.md).
 
 ## Privacy & control
@@ -98,9 +101,11 @@ session derivation, and threat model: [docs/design.md](docs/design.md).
 
 Two paired (human, agent) pairs, one thread per peer, across networks.
 Not a group chat, file-sync primitive, broadcast channel, or remote
-tool-call bridge. An optional [OpenClaw gateway mode](docs/openclaw.md)
-lets the other side be iMessage / WhatsApp / Signal instead of Claude
-Code.
+tool-call bridge. Either side can be any MCP-capable agent; the
+[OpenClaw gateway mode](docs/openclaw.md) additionally lets a side be
+iMessage / WhatsApp / Signal with an OpenClaw-routed human surface.
+Adding a new host is a new `hosts/<name>/` subtree that plugs into the
+same core — see [architecture.md](docs/architecture.md).
 
 ## Docs
 
