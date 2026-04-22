@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/mattn/go-isatty"
 )
@@ -43,3 +45,86 @@ func okTag() string { return green("[ok]") }
 
 // warnTag is the yellow "[warn]" marker for non-fatal notes.
 func warnTag() string { return yellow("[warn]") }
+
+// Agent brand hexes. Keep the sourcing comment next to each constant
+// so future edits see at a glance which are official and which are
+// placeholders to be corrected. Rendered via 24-bit truecolor ANSI —
+// modern terminals (iTerm2, Terminal.app, WezTerm, modern xterm,
+// GNOME, etc.) all support this. NO_COLOR still forces plain.
+const (
+	// claudeOrange is the Anthropic-published "Claude Orange". Source:
+	// https://github.com/anthropics/skills/blob/main/skills/brand-guidelines/SKILL.md
+	claudeOrange = "#D97757"
+	// geminiBlue is the primary blue of the (pre-2025) Gemini
+	// gradient. Google does not publish a single flagship hex — this
+	// is community-sourced (brandcolorcode.com/gemini).
+	geminiBlue = "#4796E3"
+	// codexGreen is unverified. Codex CLI has no published brand hex;
+	// we borrow the ChatGPT-adjacent green so Codex is visually
+	// distinct from Copilot's purple and Gemini's blue.
+	codexGreen = "#10A37F"
+	// copilotPurple is GitHub's published "Copilot Purple". Source:
+	// https://brand.github.com/brand-identity/copilot
+	copilotPurple = "#8534F3"
+	// openclawRed is a placeholder (lobster red) — no hex is
+	// documented for the in-tree OpenClaw host. Change when we adopt
+	// a real brand color.
+	openclawRed = "#E34234"
+)
+
+// agentColor returns the brand hex for an agent key ("cc", "gemini",
+// "codex", "copilot", "openclaw"). Returns "" for unknown keys.
+func agentColor(key string) string {
+	switch key {
+	case "cc":
+		return claudeOrange
+	case "gemini":
+		return geminiBlue
+	case "codex":
+		return codexGreen
+	case "copilot":
+		return copilotPurple
+	case "openclaw":
+		return openclawRed
+	}
+	return ""
+}
+
+// agentStyle wraps s in bold + the agent's brand color, using 24-bit
+// ANSI truecolor. Falls back to plain bold when color is disabled or
+// the key is unknown.
+func agentStyle(key, s string) string {
+	if !colorEnabled {
+		return s
+	}
+	h := agentColor(key)
+	if h == "" {
+		return bold(s)
+	}
+	r, g, b, ok := parseHex(h)
+	if !ok {
+		return bold(s)
+	}
+	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
+}
+
+// parseHex parses a "#RRGGBB" string into 0..255 components.
+func parseHex(h string) (r, g, b int, ok bool) {
+	if len(h) != 7 || h[0] != '#' {
+		return 0, 0, 0, false
+	}
+	parse := func(s string) (int, bool) {
+		n, err := strconv.ParseInt(s, 16, 0)
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	}
+	rr, ok1 := parse(h[1:3])
+	gg, ok2 := parse(h[3:5])
+	bb, ok3 := parse(h[5:7])
+	if !ok1 || !ok2 || !ok3 {
+		return 0, 0, 0, false
+	}
+	return rr, gg, bb, true
+}

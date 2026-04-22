@@ -94,7 +94,7 @@ func cmdSetup(args []string) error {
 			continue
 		}
 		anyAgent = true
-		fmt.Printf("  %s\n", bold(a.displayName+":"))
+		fmt.Printf("  %s\n", agentStyle(a.key, a.displayName+":"))
 		flatScopes := map[string]string{}
 		for scope, ptr := range scopes[a.key] {
 			flatScopes[scope] = *ptr
@@ -147,11 +147,11 @@ func cmdSetup(args []string) error {
 	var wired []string
 	for _, a := range agents {
 		if picks[a.key] {
-			wired = append(wired, a.displayName)
+			wired = append(wired, agentStyle(a.key, a.displayName))
 		}
 	}
 	if len(wired) > 0 {
-		fmt.Printf("   Restart: %s.\n", bold(strings.Join(wired, ", ")))
+		fmt.Printf("   Restart: %s.\n", strings.Join(wired, ", "))
 		fmt.Printf("   Then ask any of them: %s\n", cyan(`"pair me with <friend> via clawdchan."`))
 	}
 	if c, err := loadConfig(); err == nil && c.OpenClawURL != "" && daemonAlreadyInstalled() {
@@ -197,7 +197,7 @@ func resolveAgentSelection(yes bool, agents []*agentWiring, selection map[string
 		if a.defaultOn {
 			suffix = " " + green("(default)")
 		}
-		fmt.Printf("  %s %s%s\n", cyan(fmt.Sprintf("[%d]", i+1)), a.displayName, suffix)
+		fmt.Printf("  %s %s%s\n", cyan(fmt.Sprintf("[%d]", i+1)), agentStyle(a.key, a.displayName), suffix)
 	}
 	fmt.Printf("  %s %s\n", cyan("[0]"), dim("None — just identity, PATH, and the daemon"))
 	line := promptLine("Choice: ")
