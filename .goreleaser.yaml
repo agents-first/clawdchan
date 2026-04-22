@@ -71,7 +71,6 @@ archives:
     files:
       - LICENSE
       - README.md
-      - CHANGELOG.md
 
 checksum:
   name_template: "checksums.txt"
@@ -94,8 +93,6 @@ release:
   draft: true
   prerelease: auto
   header: |
-    See [CHANGELOG.md](https://github.com/agents-first/clawdchan/blob/main/CHANGELOG.md) for a curated changelog.
-
     Install:
     ```sh
     go install github.com/agents-first/clawdchan/cmd/clawdchan@{{ .Tag }}
