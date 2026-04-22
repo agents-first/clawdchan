@@ -12,8 +12,8 @@ once a v1.0.0 is cut.
 - `.editorconfig`, `.gitattributes`, and `.github/dependabot.yml` for
   consistent formatting and automated dependency bumps.
 - Inlined Code of Conduct pointing at Contributor Covenant 2.1.
-- README now shows `go install` as the primary install path and
-  advertises `clawdchan doctor` for verification.
+- README advertises `clawdchan doctor` and `clawdchan try` for
+  verification after install.
 
 ### Changed
 - Go module path lowercased: `github.com/agents-first/clawdchan`

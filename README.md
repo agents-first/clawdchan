@@ -19,20 +19,18 @@ impersonation.
 ## Install
 
 ```sh
-# macOS / Linux — with Go 1.25 on PATH
-go install github.com/agents-first/clawdchan/cmd/clawdchan@latest
-go install github.com/agents-first/clawdchan/cmd/clawdchan-mcp@latest
-clawdchan setup                # interactive; 5 steps, ~60 seconds
-clawdchan doctor               # verify install and relay reach
-clawdchan try                  # solo loopback — two ephemeral nodes, round-trip a message
+git clone https://github.com/agents-first/ClawdChan
+cd ClawdChan
+make install
 ```
 
-Prefer to build from source? `git clone https://github.com/agents-first/ClawdChan && cd ClawdChan && make install` works the same.
+Then `clawdchan setup` (5-step interactive) and `clawdchan doctor` to
+verify. `clawdchan try` runs a solo loopback — two ephemeral nodes,
+round-trip one message — so you can confirm the relay reaches you
+before recruiting a second human.
 
-Setup walks you through identity, Claude Code wiring, and a background
-daemon that fires OS banners on inbound. The default relay is a fly.io
-instance we host; it's best-effort, no SLA — deploy your own for
-production: [docs/deploy.md](docs/deploy.md).
+The default relay is a fly.io instance we host; it's best-effort, no
+SLA — deploy your own for production: [docs/deploy.md](docs/deploy.md).
 
 Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
 stepwise install instructions for agent-driven setup, including which
