@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for clawdchan-test-relay on 2026-04-19T13:24:20+03:00
+# fly.toml app configuration file generated for clawdchan-relay on 2026-04-22T23:29:19+03:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'clawdchan-test-relay'
+app = 'clawdchan-relay'
 primary_region = 'fra'
 
 [build]

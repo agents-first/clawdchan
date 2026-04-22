@@ -61,7 +61,7 @@ const configFileName = "config.json"
 // no SLA, and sees ciphertext only — but for first-time setup and casual
 // use it saves the "run a server first" step. Deploy your own for stable
 // or production use; see docs/deploy.md.
-const defaultPublicRelay = "wss://clawdchan-test-relay.fly.dev"
+const defaultPublicRelay = "wss://clawdchan-relay.fly.dev"
 
 // defaultDataDir returns the per-user data directory for the node.
 // Unix-y platforms keep the dotfile-style ~/.clawdchan that's been the
