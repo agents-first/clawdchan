@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 /*
  * Post-install: fetch the matching prebuilt clawdchan archive from GitHub
- * Releases and extract the three binaries into ./vendor/.
+ * Releases and extract binaries into a stable location that survives
+ * `npm uninstall` / `npx` cache GC.
  *
- *   CLAWDCHAN_VERSION=v0.1.0  pin to a specific tag (default: package.json .version,
- *                             or "latest" if the version isn't yet released)
- *   CLAWDCHAN_SKIP_POSTINSTALL=1  don't download (e.g. in CI that vendors elsewhere)
+ * Install order:
+ *   1. $CLAWDCHAN_INSTALL_DIR if set
+ *   2. ~/.clawdchan/bin (preferred — matches the shell installer;
+ *      keeps the launchd/systemd plist path stable across npm upgrades)
+ *   3. <package>/vendor/ (fallback when home isn't writable, e.g. sudo npm i -g)
+ *
+ * The bin shims in ../bin/ prefer the stable path and fall back to vendor/.
+ *
+ *   CLAWDCHAN_VERSION=v0.1.0          pin a specific release tag
+ *   CLAWDCHAN_SKIP_POSTINSTALL=1      skip the download entirely
+ *   CLAWDCHAN_INSTALL_DIR=~/bin       override the install dir
  */
 
 "use strict";
@@ -26,6 +35,7 @@ const REPO = "agents-first/clawdchan";
 const PKG = require("../package.json");
 const VERSION = process.env.CLAWDCHAN_VERSION || `v${PKG.version}`;
 const VENDOR = path.join(__dirname, "..", "vendor");
+const BINS = ["clawdchan", "clawdchan-mcp", "clawdchan-relay"];
 
 const OS_MAP = { darwin: "macOS", linux: "Linux" };
 const ARCH_MAP = { x64: "x86_64", arm64: "arm64" };
@@ -41,8 +51,7 @@ if (!osName || !archName) {
 main().catch((err) => {
   log(`install failed: ${err.message}`);
   log(`fetch manually from https://github.com/${REPO}/releases and place binaries in ${VENDOR}`);
-  // Exit 0 so `npm i` doesn't hard-fail — the bin shims print a friendly error if the binary is missing.
-  process.exit(0);
+  process.exit(0); // don't hard-fail npm i; shim prints a friendly error if the binary is missing
 });
 
 async function main() {
@@ -53,7 +62,6 @@ async function main() {
 
   log(`downloading clawdchan ${tag} (${osName}_${archName})`);
 
-  fs.mkdirSync(VENDOR, { recursive: true });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "clawdchan-"));
   const archivePath = path.join(tmp, archive);
 
@@ -68,16 +76,68 @@ async function main() {
       log(`checksum check skipped: ${e.message}`);
     }
 
-    execFileSync("tar", ["-xzf", archivePath, "-C", VENDOR], { stdio: "ignore" });
-    for (const b of ["clawdchan", "clawdchan-mcp", "clawdchan-relay"]) {
-      const p = path.join(VENDOR, b);
-      if (!fs.existsSync(p)) throw new Error(`missing ${b} in archive`);
-      fs.chmodSync(p, 0o755);
+    const installDir = chooseInstallDir();
+    fs.mkdirSync(installDir, { recursive: true });
+    execFileSync("tar", ["-xzf", archivePath, "-C", tmp], { stdio: "ignore" });
+
+    for (const b of BINS) {
+      const src = path.join(tmp, b);
+      if (!fs.existsSync(src)) throw new Error(`missing ${b} in archive`);
+      const dst = path.join(installDir, b);
+      fs.renameSync(src, dst);
+      fs.chmodSync(dst, 0o755);
     }
-    log(`installed binaries to ${VENDOR}`);
+    log(`installed binaries to ${installDir}`);
+
+    maybeNoteTerminalNotifier();
+
     log("next: run `clawdchan setup`");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function chooseInstallDir() {
+  const override = process.env.CLAWDCHAN_INSTALL_DIR;
+  if (override) return expandHome(override);
+
+  const stable = path.join(os.homedir(), ".clawdchan", "bin");
+  try {
+    fs.mkdirSync(stable, { recursive: true });
+    const probe = path.join(stable, `.wtest-${process.pid}`);
+    fs.writeFileSync(probe, "");
+    fs.unlinkSync(probe);
+    return stable;
+  } catch (e) {
+    log(`cannot write to ${stable} (${e.code || e.message}); falling back to ${VENDOR}`);
+    return VENDOR;
+  }
+}
+
+function expandHome(p) {
+  if (p === "~" || p.startsWith("~/")) return path.join(os.homedir(), p.slice(1));
+  return p;
+}
+
+function maybeNoteTerminalNotifier() {
+  if (process.platform !== "darwin") return;
+  if (which("terminal-notifier")) return;
+  if (which("brew")) {
+    log("note: `terminal-notifier` is recommended on macOS (osascript banners are often dropped).");
+    log("      install it with: brew install terminal-notifier");
+  } else {
+    log("note: install `terminal-notifier` via Homebrew for reliable macOS banner notifications.");
+  }
+  // Postinstall runs non-interactively under `npm i -g`; we don't prompt here.
+  // `clawdchan daemon install` (invoked later by `clawdchan setup`) surfaces the same hint.
+}
+
+function which(cmd) {
+  try {
+    execFileSync("sh", ["-c", `command -v ${cmd}`], { stdio: ["ignore", "ignore", "ignore"] });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -93,28 +153,29 @@ function verifyChecksum(archivePath, archiveName, sumsPath) {
 function resolveTag(requested) {
   if (requested && requested !== "latest") return Promise.resolve(requested);
   return new Promise((resolve, reject) => {
-    const req = https.get(
-      `https://api.github.com/repos/${REPO}/releases/latest`,
-      { headers: { "User-Agent": "clawdchan-npm-installer" } },
-      (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`GitHub API HTTP ${res.statusCode}`));
-          return;
-        }
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => {
-          try {
-            const tag = JSON.parse(body).tag_name;
-            if (!tag) throw new Error("no tag_name in response");
-            resolve(tag);
-          } catch (e) {
-            reject(e);
+    https
+      .get(
+        `https://api.github.com/repos/${REPO}/releases/latest`,
+        { headers: { "User-Agent": "clawdchan-npm-installer" } },
+        (res) => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`GitHub API HTTP ${res.statusCode}`));
+            return;
           }
-        });
-      }
-    );
-    req.on("error", reject);
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () => {
+            try {
+              const tag = JSON.parse(body).tag_name;
+              if (!tag) throw new Error("no tag_name in response");
+              resolve(tag);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        }
+      )
+      .on("error", reject);
   });
 }
 

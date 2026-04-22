@@ -163,6 +163,20 @@ if [ "$PATH_OK" -eq 0 ]; then
   say ""
 fi
 
+if [ "$uname_s" = "Darwin" ] && ! command -v terminal-notifier >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]; then
+    printf "\nterminal-notifier is recommended on macOS (osascript banners are often dropped).\nInstall via 'brew install terminal-notifier'? [Y/n] "
+    read ans
+    case "$ans" in
+      n|N|no|NO) say "skipped — install later with: brew install terminal-notifier" ;;
+      *)         brew install terminal-notifier || warn "brew install failed — continue without it" ;;
+    esac
+  else
+    say "note: install 'terminal-notifier' for reliable macOS banners (brew install terminal-notifier)"
+  fi
+  say ""
+fi
+
 if [ "$RUN_SETUP" = "yes" ] || { [ "$RUN_SETUP" = "auto" ] && [ -t 0 ] && [ -t 1 ]; }; then
   say "==> running: clawdchan setup"
   "$BIN_DIR/clawdchan" setup || warn "setup did not complete — re-run '$BIN_DIR/clawdchan setup' anytime"
