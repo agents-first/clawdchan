@@ -39,17 +39,28 @@ func green(s string) string  { return style(s, "\x1b[32m") }
 func yellow(s string) string { return style(s, "\x1b[33m") }
 func cyan(s string) string   { return style(s, "\x1b[36m") }
 
-// printBanner emits the setup banner. Slashes are tinted Claude-
-// orange — the paw/claw shape (///// ClawdChan \\\\\) echoes the
-// project name and the orange nods to Claude as the default host
-// without hardcoding "Claude" into the banner itself.
+// printBanner emits the setup banner — a figlet "standard"-style
+// ASCII rendering of "ClawdChan" tinted Claude-orange, followed by
+// a dim tagline. Degrades to plain text under NO_COLOR / non-TTY
+// via hexColor.
+//
+// The art is hand-written (not generated at runtime) so there's no
+// figlet dependency and the bytes are exactly what we ship. If you
+// edit the letters, preserve trailing whitespace — each line is
+// right-padded so the orange block is a clean rectangle.
 func printBanner() {
-	const left = "/////"
-	const right = `\\\\\`
-	fmt.Printf("%s %s %s\n",
-		hexColor(left, claudeOrange),
-		bold("ClawdChan"),
-		hexColor(right, claudeOrange))
+	lines := []string{
+		"   ____ _                   _  ____ _                 ",
+		"  / ___| | __ ___      ____| |/ ___| |__   __ _ _ __  ",
+		" | |   | |/ _` \\ \\ /\\ / / _` | |   | '_ \\ / _` | '_ \\ ",
+		" | |___| | (_| |\\ V  V / (_| | |___| | | | (_| | | | |",
+		"  \\____|_|\\__,_| \\_/\\_/ \\__,_|\\____|_| |_|\\__,_|_| |_|",
+	}
+	fmt.Println()
+	for _, l := range lines {
+		fmt.Println(hexColor(l, claudeOrange))
+	}
+	fmt.Println(dim("  let my Claude talk to yours."))
 }
 
 // hexColor wraps s in a 24-bit foreground color from "#RRGGBB". Falls
