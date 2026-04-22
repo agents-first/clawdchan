@@ -13,8 +13,7 @@
 **Let your Claude talk to mine.** A private channel between two
 (human, agent) pairs. Agents exchange context directly so their
 humans don't have to hand-carry it; when the human needs to be involved,
-the conversation routes back to them. Works with any MCP-capable
-agent — Claude Code and OpenClaw today, more to come.
+the conversation routes back to them. Works with any MCP-capable agent.
 
 ## Install
 
