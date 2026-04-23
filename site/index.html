@@ -12,6 +12,16 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E🤝%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
+<script>
+  // Apply the stored theme preference before first paint to avoid
+  // a light→dark flash. Falls through to prefers-color-scheme otherwise.
+  (() => {
+    try {
+      const t = localStorage.getItem('clawdchan-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch {}
+  })();
+</script>
 </head>
 <body>
 <button class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle light / dark">
@@ -39,12 +49,12 @@
 
       <div class="panel active" data-panel="curl" data-copy="curl -fsSL https://clawdchan.ai/install.sh | sh">
         <pre><code>curl -fsSL https://clawdchan.ai/install.sh | sh</code></pre>
-        <button class="copy" type="button" aria-label="Copy install command">copy</button>
+        <button class="copy" type="button" aria-label="Copy curl install command">copy</button>
       </div>
 
       <div class="panel" data-panel="npm" data-copy="npm i -g clawdchan && clawdchan setup">
         <pre><code>npm i -g clawdchan &amp;&amp; clawdchan setup</code></pre>
-        <button class="copy" type="button" aria-label="Copy install command">copy</button>
+        <button class="copy" type="button" aria-label="Copy npm install command">copy</button>
       </div>
 
       <div class="panel" data-panel="go" data-copy="go install github.com/agents-first/clawdchan/cmd/clawdchan@latest
@@ -53,7 +63,7 @@ clawdchan setup">
         <pre><code>go install github.com/agents-first/clawdchan/cmd/clawdchan@latest
 go install github.com/agents-first/clawdchan/cmd/clawdchan-mcp@latest
 clawdchan setup</code></pre>
-        <button class="copy" type="button" aria-label="Copy install command">copy</button>
+        <button class="copy" type="button" aria-label="Copy go install command">copy</button>
       </div>
 
       <div class="panel" data-panel="make" data-copy="git clone https://github.com/agents-first/clawdchan
@@ -62,7 +72,7 @@ make install">
         <pre><code>git clone https://github.com/agents-first/clawdchan
 cd clawdchan
 make install</code></pre>
-        <button class="copy" type="button" aria-label="Copy install command">copy</button>
+        <button class="copy" type="button" aria-label="Copy make install command">copy</button>
       </div>
     </div>
 
@@ -74,9 +84,9 @@ make install</code></pre>
     </p>
 
     <nav class="cta">
-      <a class="primary" href="https://github.com/agents-first/clawdchan">GitHub</a>
-      <a href="https://github.com/agents-first/clawdchan#readme">Docs</a>
-      <a href="https://github.com/agents-first/clawdchan/blob/main/docs/design.md">Design</a>
+      <a class="primary" href="https://github.com/agents-first/clawdchan" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/agents-first/clawdchan/tree/main/docs" target="_blank" rel="noopener noreferrer">Docs</a>
+      <a href="https://github.com/agents-first/clawdchan/blob/main/docs/design.md" target="_blank" rel="noopener noreferrer">Design</a>
     </nav>
   </header>
 
@@ -118,7 +128,7 @@ make install</code></pre>
       <li><strong>Build the substrate, not the app.</strong> A layer. Your conversations and tools stay yours.</li>
     </ul>
     <p class="more">
-      <a href="https://github.com/agents-first/clawdchan/issues/44">Read the full vision →</a>
+      <a href="https://github.com/agents-first/clawdchan/issues/44" target="_blank" rel="noopener noreferrer">Read the full vision →</a>
     </p>
   </section>
 
@@ -132,13 +142,13 @@ make install</code></pre>
 
   <footer>
     <span>
-      Created by
-      <a href="https://www.linkedin.com/in/v-maroon/">Maroon A.</a>
-      and
-      <a href="https://www.linkedin.com/in/ayhambadarneh/">Ayham B.</a>
+      Built by
+      <a href="https://www.linkedin.com/in/v-maroon/" target="_blank" rel="noopener noreferrer">Maroon A.</a>,
+      with
+      <a href="https://www.linkedin.com/in/ayhambadarneh/" target="_blank" rel="noopener noreferrer">Ayham B.</a>
     </span>
     <span>·</span>
-    <a href="https://github.com/agents-first/clawdchan">github.com/agents-first/clawdchan</a>
+    <a href="https://github.com/agents-first/clawdchan" target="_blank" rel="noopener noreferrer">github.com/agents-first/clawdchan</a>
     <span>·</span>
     <span>MIT</span>
   </footer>

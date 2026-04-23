@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,9 +54,9 @@ func setupCodex(yes bool, scopes map[string]string) error {
 		}
 	}
 
-	mcpBin, _ := resolveMCPBinary()
-	if mcpBin == "" {
-		return errors.New("clawdchan-mcp not on PATH — run `make install` first, then re-run setup")
+	mcpBin, err := requireMCPBinary()
+	if err != nil {
+		return err
 	}
 
 	switch scope {

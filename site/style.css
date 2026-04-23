@@ -17,11 +17,6 @@
 }
 
 /* Dark palette — applied via @media (auto) or [data-theme="dark"] (manual). */
-:root[data-theme="dark"],
-:root:not([data-theme="light"]) {
-  /* overridden below only in dark contexts */
-}
-
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #1b1714;
@@ -74,6 +69,12 @@
   z-index: 10;
 }
 .theme-toggle:hover { color: var(--ink); border-color: var(--ink-soft); transform: rotate(-8deg); }
+.theme-toggle:focus-visible,
+.copy:focus-visible,
+.tabs button:focus-visible {
+  outline: 2px solid var(--coral-deep);
+  outline-offset: 2px;
+}
 .theme-toggle .icon-sun  { display: none; }
 .theme-toggle .icon-moon { display: block; }
 

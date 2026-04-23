@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -71,9 +70,9 @@ func setupClaudeCodeMCP(yes bool, flagScope string) error {
 		}
 	}
 
-	mcpBin, _ := resolveMCPBinary()
-	if mcpBin == "" {
-		return errors.New("clawdchan-mcp not on PATH — run `make install` first, then re-run setup")
+	mcpBin, err := requireMCPBinary()
+	if err != nil {
+		return err
 	}
 
 	switch scope {

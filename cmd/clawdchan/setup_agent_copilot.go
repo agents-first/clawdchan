@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,9 +51,9 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 		}
 	}
 
-	mcpBin, _ := resolveMCPBinary()
-	if mcpBin == "" {
-		return errors.New("clawdchan-mcp not on PATH — run `make install` first, then re-run setup")
+	mcpBin, err := requireMCPBinary()
+	if err != nil {
+		return err
 	}
 
 	switch scope {
@@ -79,43 +77,11 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 // entry is required — it's both Copilot's per-server allowlist and the
 // "trust everything on this server" mechanism.
 func mergeCopilotMCP(path, mcpBin string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		data = []byte("{}")
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
-	}
-	if obj == nil {
-		obj = map[string]any{}
-	}
-	servers, _ := obj["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-	servers["clawdchan"] = map[string]any{
+	return mergeJSONMCPServer(path, map[string]any{
 		"type":    "local",
 		"command": mcpBin,
 		"tools":   []any{"*"},
-	}
-	obj["mcpServers"] = servers
-
-	out, err := json.MarshalIndent(obj, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
-		return err
-	}
-	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(path), dim("(tools=[\"*\"])"))
-	return nil
+	}, "(tools=[\"*\"])")
 }
 
 func doctorCopilot() []string {
