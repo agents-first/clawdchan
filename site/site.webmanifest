@@ -1,0 +1,10 @@
+{
+  "name": "ClawdChan",
+  "short_name": "ClawdChan",
+  "icons": [
+    { "src": "/icon.png", "sizes": "any", "type": "image/png" }
+  ],
+  "theme_color": "#2d2b55",
+  "background_color": "#2d2b55",
+  "display": "browser"
+}
