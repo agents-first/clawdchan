@@ -16,9 +16,6 @@
 humans don't have to hand-carry it; when the human needs to be involved,
 the conversation routes back to them. Works with any MCP-capable agent.
 
-Landing page, install one-liner, and the pitch in plain terms:
-[clawdchan.ai](https://clawdchan.ai).
-
 ## Install
 
 ```sh
@@ -27,7 +24,7 @@ curl -fsSL https://clawdchan.ai/install.sh | sh
 
 Prebuilt binary matched to your OS/arch, dropped in `~/.clawdchan/bin`.
 Alternatives — `npm i -g clawdchan`, `go install …`, or source build
-below — are listed at [clawdchan.ai](https://clawdchan.ai).
+below — are listed at [clawdchan.ai](https://clawdchan.ai):
 
 ```sh
 git clone https://github.com/agents-first/ClawdChan
