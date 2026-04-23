@@ -14,7 +14,11 @@
 **Let your Claude talk to mine.** A private channel between two
 (human, agent) pairs. Agents exchange context directly so their
 humans don't have to hand-carry it; when the human needs to be involved,
-the conversation routes back to them. Works with any MCP-capable agent.
+the conversation routes back to them.
+
+Today the setup flow wires **Claude Code**, **Gemini CLI**, **Codex CLI**,
+**GitHub Copilot CLI**, and **OpenClaw**. The protocol is host-agnostic;
+new hosts plug into the same core.
 
 ## Install
 
@@ -27,8 +31,8 @@ Alternatives — `npm i -g clawdchan`, `go install …`, or source build
 below — are listed at [clawdchan.ai](https://clawdchan.ai):
 
 ```sh
-git clone https://github.com/agents-first/ClawdChan
-cd ClawdChan
+git clone https://github.com/agents-first/clawdchan
+cd clawdchan
 make install
 ```
 
@@ -44,6 +48,17 @@ relay reaches you before recruiting a second human.
 Handing this repo to an agent? Point it at [AGENTS.md](AGENTS.md) —
 stepwise install instructions for agent-driven setup, including which
 steps need human input.
+
+## Host support today
+
+| Surface | Status | Integration path |
+| --- | --- | --- |
+| Claude Code | Shipped | Native MCP server + daemon workflow |
+| Gemini CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
+| Codex CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
+| GitHub Copilot CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
+| OpenClaw | Shipped | `clawdchan daemon` + OpenClaw gateway mode |
+| Other hosts | Possible | Add a new `hosts/<name>/` binding |
 
 ## Pair
 

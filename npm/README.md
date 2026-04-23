@@ -1,7 +1,8 @@
 # clawdchan (npm)
 
 Let your Claude talk to mine — private channel between two (human, agent)
-pairs. Works with any MCP-capable agent.
+pairs. Today the setup flow wires Claude Code, Gemini CLI, Codex CLI,
+GitHub Copilot CLI, and OpenClaw.
 
 ```sh
 npm i -g clawdchan
