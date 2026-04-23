@@ -46,6 +46,7 @@
     <div class="install">
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true"  data-tab="curl">curl</button>
+        <button role="tab" aria-selected="false" data-tab="powershell">powershell</button>
         <button role="tab" aria-selected="false" data-tab="npm">npm</button>
         <button role="tab" aria-selected="false" data-tab="go">go</button>
         <button role="tab" aria-selected="false" data-tab="make">make</button>
@@ -54,6 +55,11 @@
       <div class="panel active" data-panel="curl" data-copy="curl -fsSL https://clawdchan.ai/install.sh | sh">
         <pre><code>curl -fsSL https://clawdchan.ai/install.sh | sh</code></pre>
         <button class="copy" type="button" aria-label="Copy curl install command">copy</button>
+      </div>
+
+      <div class="panel" data-panel="powershell" data-copy="irm https://clawdchan.ai/install.ps1 | iex">
+        <pre><code>irm https://clawdchan.ai/install.ps1 | iex</code></pre>
+        <button class="copy" type="button" aria-label="Copy powershell install command">copy</button>
       </div>
 
       <div class="panel" data-panel="npm" data-copy="npm i -g clawdchan && clawdchan setup">
