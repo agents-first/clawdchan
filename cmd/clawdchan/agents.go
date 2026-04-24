@@ -57,6 +57,7 @@ func allAgents() []*agentWiring {
 		geminiAgent(),
 		codexAgent(),
 		copilotAgent(),
+		cursorAgent(),
 	}
 }
 
@@ -105,6 +106,8 @@ func mcpScopeChoices(a *agentWiring) []string {
 	case "cc", "gemini":
 		return []string{"user", "project"}
 	default:
+		// Codex, Copilot, and Cursor are user-scope only. Cursor specifically
+		// ignores project-level .cursor/mcp.json — only ~/.cursor/mcp.json loads.
 		return []string{"user"}
 	}
 }
