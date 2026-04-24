@@ -26,6 +26,8 @@
 # Fly.io configuration file
 fly.toml
 
+vendor
+
 # Gemini CLI local settings
 .gemini/
 
