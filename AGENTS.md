@@ -22,7 +22,7 @@ and you **must** pause there — do not bypass prompts or run with
 
    This puts `clawdchan`, `clawdchan-relay`, and `clawdchan-mcp` into
    `$(go env GOPATH)/bin`. The `clawdchan-mcp` binary must be
-   discoverable on the user's PATH for Claude Code to launch it.
+   discoverable on the user's PATH for MCP hosts to launch it.
 
 2. **Run interactive setup.**
 
@@ -30,13 +30,14 @@ and you **must** pause there — do not bypass prompts or run with
    clawdchan setup
    ```
 
-   Setup is a 5-step interactive flow: identity, Claude Code wiring,
-   PATH, OpenClaw gateway, background daemon. **Tell the user to walk
-   through it themselves** — you should not pipe input into it.
+   Setup is a 5-step interactive flow: identity, agent wiring, PATH,
+   OpenClaw gateway, background daemon. **Tell the user to walk through
+   it themselves** — you should not pipe input into it.
 
-   Up front the user picks which agents to wire (Claude Code /
-   OpenClaw / Both / None). Inside the Claude Code step there are two
-   scope decisions that only the user can make:
+   Up front the user picks which MCP hosts to wire: Claude Code,
+   Gemini CLI, Codex CLI, GitHub Copilot CLI, Cursor, or none.
+   OpenClaw is a separate yes/no step later in setup. If Claude Code is
+   selected, there are two scope decisions that only the user can make:
 
    - **MCP server registration:** user-wide (recommended) writes
      `~/.claude.json` via `claude mcp add -s user`; project writes
@@ -55,8 +56,8 @@ and you **must** pause there — do not bypass prompts or run with
    opt out explicitly, or `=project` / `=project-local` to change the
    destination.
 
-3. **Restart Claude Code** so the new `.mcp.json` loads the MCP
-   server. The user does this — quit and reopen.
+3. **Restart any selected MCP host** so its updated config loads. The
+   user does this — quit and reopen.
 
 4. **Verify.** Ask the user to run `clawdchan whoami` in a terminal.
    Expect a node_id and alias. If that works, ClawdChan is installed.
@@ -69,9 +70,9 @@ and you **must** pause there — do not bypass prompts or run with
   the project runs; `clawdchan init` defaults to it. If the user
   wants their own relay, point them at `docs/deploy.md`.
 - Do not generate a pairing mnemonic during install — pairing is a
-  runtime action the user drives from Claude Code after install
-  completes. The `/clawdchan` slash command and the MCP tool
-  descriptions cover how that works.
+  runtime action the user drives from their chosen host after install
+  completes. The MCP tool descriptions and host docs cover how that
+  works.
 - Do not run `clawdchan daemon run` directly as a test — if the user
   accepts step 5's daemon install, the service auto-starts at login
   and runs in the background. Running it manually holds the relay
@@ -81,8 +82,10 @@ and you **must** pause there — do not bypass prompts or run with
 
 - `make install` failure: read the error; usually missing Go toolchain
   or a module network error. Ask the user, don't retry blindly.
-- `clawdchan setup` step 2 (`.mcp.json`): safe to skip; user can run
-  `clawdchan init -write-mcp <project-dir>` later.
+- `clawdchan setup` step 2 (agent wiring): safe to skip; user can rerun
+  `clawdchan setup` later. For Claude Code specifically, the user can
+  also run `clawdchan init -write-mcp <project-dir>` to write a project
+  `.mcp.json`.
 - `clawdchan setup` step 5 (daemon): on macOS, the user may need to
   `brew install terminal-notifier` for notifications to reliably
   appear (the fallback `osascript` path is fragile). Mention this
