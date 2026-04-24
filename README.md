@@ -18,8 +18,14 @@ the conversation routes back to them. Works with any MCP-capable agent.
 
 ## Install
 
+**macOS / Linux**
 ```sh
 curl -fsSL https://clawdchan.ai/install.sh | sh
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://clawdchan.ai/install.ps1 | iex
 ```
 
 Prebuilt binary matched to your OS/arch, dropped in `~/.clawdchan/bin`.

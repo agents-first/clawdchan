@@ -59,7 +59,7 @@ uname_m=$(uname -m 2>/dev/null || echo unknown)
 case "$uname_s" in
   Darwin)                 OS_ARCHIVE="macOS" ;;
   Linux)                  OS_ARCHIVE="Linux" ;;
-  MINGW*|MSYS*|CYGWIN*)   die "windows: use the zip archive on the releases page" ;;
+  MINGW*|MSYS*|CYGWIN*)   die "windows: use irm https://clawdchan.ai/install.ps1 | iex" ;;
   *)                      die "unsupported OS: $uname_s" ;;
 esac
 
