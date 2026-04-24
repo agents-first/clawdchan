@@ -170,6 +170,49 @@ pre code { background: transparent; border: 0; padding: 0; color: inherit; }
   text-align: left;
 }
 
+/* Supported hosts */
+.hosts {
+  max-width: 560px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+.hosts-caption {
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.hosts-row {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+.hosts-row li { display: inline-flex; }
+.hosts-row img {
+  height: 22px;
+  width: auto;
+  filter: grayscale(1);
+  opacity: 0.55;
+  transition: filter .15s ease, opacity .15s ease;
+}
+.hosts-row img:hover {
+  filter: none;
+  opacity: 1;
+}
+/* Dark mode: invert the grayscale so logos read light-on-dark. */
+:root[data-theme="dark"] .hosts-row img { filter: grayscale(1) invert(1); opacity: 0.7; }
+:root[data-theme="dark"] .hosts-row img:hover { filter: grayscale(1) invert(1); opacity: 1; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hosts-row img { filter: grayscale(1) invert(1); opacity: 0.7; }
+  :root:not([data-theme="light"]) .hosts-row img:hover { filter: grayscale(1) invert(1); opacity: 1; }
+}
+
 /* Install block */
 .install {
   text-align: left;
