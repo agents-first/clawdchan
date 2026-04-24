@@ -90,10 +90,11 @@ func setupGemini(yes bool, scopes map[string]string) error {
 // tool calls don't prompt — equivalent to the mcp__clawdchan CC
 // allow-rule.
 func mergeGeminiMCP(path, mcpBin string) error {
-	return mergeJSONMCPServer(path, map[string]any{
+	_, err := mergeJSONMCPServer(path, map[string]any{
 		"command": mcpBin,
 		"trust":   true,
 	}, "(trust=true)")
+	return err
 }
 
 func doctorGemini() []string {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -82,39 +81,17 @@ func installCursorMCPGlobal(mcpBin string) error {
 		return err
 	}
 	configPath := filepath.Join(cursorDir, "mcp.json")
-
-	// Read existing config or start from scratch.
-	var obj map[string]any
-	if data, err := os.ReadFile(configPath); err == nil {
-		if err := json.Unmarshal(data, &obj); err != nil {
-			return fmt.Errorf("parse %s: %w", configPath, err)
-		}
-	}
-	if obj == nil {
-		obj = map[string]any{}
-	}
-
-	servers, _ := obj["mcpServers"].(map[string]any)
-	if servers == nil {
-		servers = map[string]any{}
-	}
-
-	action := "added"
-	if _, exists := servers["clawdchan"]; exists {
-		action = "updated"
-	}
-	servers["clawdchan"] = map[string]any{"command": mcpBin}
-	obj["mcpServers"] = servers
-
-	out, err := json.MarshalIndent(obj, "", "  ")
+	added, err := mergeJSONMCPServer(configPath, map[string]any{
+		"command": mcpBin,
+	}, "(global)")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(configPath, append(out, '\n'), 0o644); err != nil {
-		return err
+	action := "updated"
+	if added {
+		action = "added"
 	}
-
-	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(configPath), dim("("+action+")"))
+	fmt.Printf("      %s %s\n", dim("status:"), dim(action))
 	fmt.Printf("    %s Fully quit Cursor %s and reopen — window reload is not enough.\n",
 		warnTag(), dim("(Cmd+Q on macOS / Alt+F4 on Windows/Linux)"))
 	fmt.Printf("      Verify: Cursor Settings → MCP — clawdchan should show a green connected status.\n")

@@ -28,20 +28,22 @@ func requireMCPBinary() (string, error) {
 // sibling field. Creates the file (and its parent dir) if missing.
 //
 // Used by hosts whose config format is a plain JSON object keyed by
-// mcpServers (Gemini CLI, GitHub Copilot CLI). The logSuffix is the
-// parenthetical shown at the end of the success line, e.g.
-// "(trust=true)" for Gemini or `(tools=["*"])` for Copilot.
-func mergeJSONMCPServer(path string, entry map[string]any, logSuffix string) error {
+// mcpServers (Gemini CLI, GitHub Copilot CLI, Cursor). Returns whether
+// the clawdchan entry was newly added (true) or updated in place
+// (false). The logSuffix is the parenthetical shown at the end of the
+// success line, e.g. "(trust=true)" for Gemini or `(tools=["*"])` for
+// Copilot.
+func mergeJSONMCPServer(path string, entry map[string]any, logSuffix string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return err
+			return false, err
 		}
 		data = []byte("{}")
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+		return false, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if obj == nil {
 		obj = map[string]any{}
@@ -50,19 +52,20 @@ func mergeJSONMCPServer(path string, entry map[string]any, logSuffix string) err
 	if servers == nil {
 		servers = map[string]any{}
 	}
+	_, existed := servers["clawdchan"]
 	servers["clawdchan"] = entry
 	obj["mcpServers"] = servers
 
 	out, err := json.MarshalIndent(obj, "", "  ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
-		return err
+		return false, err
 	}
 	fmt.Printf("    %s MCP %s %s %s\n", okTag(), dim("→"), dim(path), dim(logSuffix))
-	return nil
+	return !existed, nil
 }

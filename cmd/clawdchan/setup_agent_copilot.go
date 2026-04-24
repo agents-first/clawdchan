@@ -77,11 +77,12 @@ func setupCopilot(yes bool, scopes map[string]string) error {
 // entry is required — it's both Copilot's per-server allowlist and the
 // "trust everything on this server" mechanism.
 func mergeCopilotMCP(path, mcpBin string) error {
-	return mergeJSONMCPServer(path, map[string]any{
+	_, err := mergeJSONMCPServer(path, map[string]any{
 		"type":    "local",
 		"command": mcpBin,
 		"tools":   []any{"*"},
 	}, "(tools=[\"*\"])")
+	return err
 }
 
 func doctorCopilot() []string {
