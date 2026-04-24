@@ -51,15 +51,18 @@ steps need human input.
 
 ## Host support today
 
-| Surface | Status | Integration path |
-| --- | --- | --- |
-| Claude Code | Shipped | Native MCP server + daemon workflow |
-| Gemini CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
-| Codex CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
-| GitHub Copilot CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
-| Cursor | Shipped | `clawdchan-mcp` wired by `clawdchan setup` in `~/.cursor/mcp.json` |
-| OpenClaw | Shipped | `clawdchan daemon` + OpenClaw gateway mode |
-| Other hosts | Possible | Add a new `hosts/<name>/` binding |
+| Surface | Status |
+| --- | --- |
+| Claude Code | Shipped |
+| Gemini CLI | Shipped |
+| Codex CLI | Shipped |
+| GitHub Copilot CLI | Shipped |
+| Cursor | Shipped |
+| OpenClaw | Shipped |
+| Other hosts | Possible |
+
+The daemon is shared infrastructure across the shipped hosts; OpenClaw adds
+gateway mode on top rather than a separate host-specific daemon path.
 
 ## Pair
 
