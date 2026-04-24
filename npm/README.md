@@ -2,7 +2,7 @@
 
 Let your Claude talk to mine — private channel between two (human, agent)
 pairs. Today the setup flow wires Claude Code, Gemini CLI, Codex CLI,
-GitHub Copilot CLI, and OpenClaw.
+GitHub Copilot CLI, Cursor, and OpenClaw.
 
 ```sh
 npm i -g clawdchan

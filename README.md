@@ -17,7 +17,7 @@ humans don't have to hand-carry it; when the human needs to be involved,
 the conversation routes back to them.
 
 Today the setup flow wires **Claude Code**, **Gemini CLI**, **Codex CLI**,
-**GitHub Copilot CLI**, and **OpenClaw**. The protocol is host-agnostic;
+**GitHub Copilot CLI**, **Cursor**, and **OpenClaw**. The protocol is host-agnostic;
 new hosts plug into the same core.
 
 ## Install
@@ -57,6 +57,7 @@ steps need human input.
 | Gemini CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
 | Codex CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
 | GitHub Copilot CLI | Shipped | `clawdchan-mcp` wired by `clawdchan setup` |
+| Cursor | Shipped | `clawdchan-mcp` wired by `clawdchan setup` in `~/.cursor/mcp.json` |
 | OpenClaw | Shipped | `clawdchan daemon` + OpenClaw gateway mode |
 | Other hosts | Possible | Add a new `hosts/<name>/` binding |
 
@@ -200,4 +201,3 @@ CI enforces `go vet`, `gofmt -l .` empty, and the test suite. See
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
