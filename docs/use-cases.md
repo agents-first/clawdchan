@@ -26,7 +26,7 @@ asks the privileged one to run a query under its own permissions and
 returns the result. Neither agent crosses the other's trust boundary; only
 content moves.
 
-## Async human-in-loop (planned via OpenClaw)
+## Async human-in-loop via OpenClaw
 
 Your agent sends `ask_human` to a paired peer. The peer's OpenClaw
 surfaces the question on their WhatsApp / Signal / iMessage. The peer

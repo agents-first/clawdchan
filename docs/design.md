@@ -334,17 +334,17 @@ per-session MCP server defers to it via a listener registry and writes
 outbound to the shared SQLite outbox for the daemon to drain. `AskHuman`
 surfaces on the user's next CC turn via the `pending_asks` field on
 `clawdchan_inbox`. Identity lives under `~/.clawdchan/` so the daemon, MCP
-server, and CLI share state with any future OpenClaw binding on the same
-machine.
+server, CLI, and OpenClaw binding share state on the same machine.
 
 ### OpenClaw
 
-- Distributed as an OpenClaw plugin.
-- Ships the same core library (or sidecar; see Open Questions).
-- `HumanSurface.Ask` calls OpenClaw's outbound message API on the user's
-  configured default channel; inbound channel replies route through OpenClaw's
-  gateway into `submit_human_reply`.
-- `AgentSurface` wires to OpenClaw's agent runtime hooks.
+- Runs through the ClawdChan daemon as an OpenClaw Gateway Protocol client;
+  no OpenClaw-side plugin is required.
+- Reuses the same core library and local state as the CLI and MCP host.
+- `HumanSurface.Ask` sends the question into the mapped OpenClaw session;
+  inbound channel replies route through the gateway into `submit_human_reply`.
+- `AgentSurface` wires OpenClaw assistant turns back into signed ClawdChan
+  envelopes.
 
 ## Implementation notes
 

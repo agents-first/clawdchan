@@ -1,8 +1,8 @@
 # Architecture
 
 ClawdChan is split into a host-agnostic **core** and **host bindings** that
-adapt the core to a specific runtime (Claude Code via MCP today; OpenClaw
-planned). A reference **relay** routes ciphertext frames between peers. The
+adapt the core to specific runtimes (Claude Code via MCP and OpenClaw via
+gateway mode today). A reference **relay** routes ciphertext frames between peers. The
 relay never sees cleartext.
 
 ## Data flow
@@ -49,7 +49,7 @@ core/                host-agnostic protocol
 
 hosts/
   claudecode/        Claude Code MCP server + plugin manifest
-  openclaw/          OpenClaw binding (planned)
+  openclaw/          OpenClaw gateway binding
 
 internal/
   relayserver/       reference relay implementation
