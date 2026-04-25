@@ -26,6 +26,9 @@ func RegisterTools(s *server.MCPServer, n *node.Node) {
 	for _, reg := range hosts.All(n, buildSetupStatus) {
 		s.AddTool(toMCPTool(reg.Spec), wrap(reg.Handler))
 	}
+	for _, reg := range hosts.CollabSessionTools(n) {
+		s.AddTool(toMCPTool(reg.Spec), wrap(reg.Handler))
+	}
 }
 
 // toMCPTool converts a hosts.ToolSpec into the mcp-go native tool

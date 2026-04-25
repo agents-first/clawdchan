@@ -514,10 +514,11 @@ func promptString(prompt, defaultVal string) string {
 // body of both files matches; change them together.
 const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 	"You have the ClawdChan MCP tools (`clawdchan_*`). The surface is\n" +
-	"peer-centric and deliberately small: four tools cover everything —\n" +
+	"peer-centric and deliberately small: four core tools cover one-shot work —\n" +
 	"`clawdchan_toolkit`, `clawdchan_pair`, `clawdchan_message`,\n" +
-	"`clawdchan_inbox`. Thread IDs never surface. This file is your\n" +
-	"operator manual — how to act, not what the tools do.\n\n" +
+	"`clawdchan_inbox`. MCP clients also have first-class live-collab\n" +
+	"session tools named `clawdchan_collab_*`. Thread IDs never surface.\n" +
+	"This file is your operator manual — how to act, not what the tools do.\n\n" +
 	"## First action every session\n\n" +
 	"Call `clawdchan_toolkit`. It returns `self`, the list of paired\n" +
 	"`peers` with per-peer stats, and a `setup.user_message`. If\n" +
@@ -548,23 +549,24 @@ const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 	"  On **live**, delegate to a Task sub-agent. Do NOT run the loop on\n" +
 	"  your own turn; it freezes the user. Brief the sub-agent:\n\n" +
 	"  > You own a live ClawdChan collaboration with peer_id `<hex>`\n" +
-	"  > about `<problem>`. First action is a **liveness probe**:\n" +
-	"  > `clawdchan_message(peer, text=\"<one-line 'live on <topic>?'\n" +
-	"  > check>\", intent='ask', collab=true)` →\n" +
-	"  > `clawdchan_inbox(peer_id=<hex>, wait_seconds=15)`. If the poll\n" +
-	"  > returns `new: 0`, exit with \"peer not live on this\" — do not\n" +
-	"  > keep sending. If it returns fresh envelopes from the peer,\n" +
-	"  > record the `next_cursor` and enter the loop:\n" +
-	"  > `clawdchan_message(peer, text, intent='ask', collab=true)` →\n" +
-	"  > `clawdchan_inbox(peer_id=<hex>, wait_seconds=<T>,\n" +
-	"  > after_cursor=<last next_cursor>)` → integrate → respond. Size\n" +
-	"  > `<T>` to the work: ~10s for quick clarifications, 30–60s for\n" +
-	"  > design-level turns — not a fixed 10s. Converge on `<definition\n" +
-	"  > of done>`. Stop after `<N>` rounds, 2–3 consecutive empty polls\n" +
-	"  > (\"peer went silent\"), or any error. Return a summary: what was\n" +
-	"  > agreed, open questions, closing message. Do not ask the user\n" +
-	"  > anything. Always set `collab=true` on outbound — that tags the\n" +
-	"  > envelope so the peer knows a sub-agent is waiting.\n\n" +
+	"  > about `<problem>`. Pick a stable `owner_id` for yourself, then\n" +
+	"  > call `clawdchan_collab_start(peer_id=<hex>, topic=<topic>,\n" +
+	"  > definition_of_done=<done>, max_rounds=<N>, owner_id=<owner>)`.\n" +
+	"  > Send the liveness probe with\n" +
+	"  > `clawdchan_collab_send(session_id, text=\"<one-line live on\n" +
+	"  > <topic>? check>\", intent=\"ask\", owner_id=<owner>)`, then\n" +
+	"  > `clawdchan_collab_await(session_id, wait_seconds=15,\n" +
+	"  > heartbeat=true, owner_id=<owner>)`. If it returns `new: 0`,\n" +
+	"  > close with `status=\"timed_out\"` and summary \"peer not live on\n" +
+	"  > this\" — do not keep sending. If it returns fresh peer envelopes,\n" +
+	"  > enter the loop: integrate → `clawdchan_collab_send` →\n" +
+	"  > `clawdchan_collab_await`. Size waits to the work: ~10s for quick\n" +
+	"  > clarifications, 30–60s for design-level turns. Converge on\n" +
+	"  > `<definition of done>`. Stop after `<N>` rounds, 2–3 consecutive\n" +
+	"  > empty polls (\"peer went silent\"), a lease error, or any tool\n" +
+	"  > error. Close with `clawdchan_collab_close(session_id, status,\n" +
+	"  > summary, close_reason)` and return the same summary to the main\n" +
+	"  > agent. Do not ask the user anything.\n\n" +
 	"  Free the main turn. Tell the user the loop is running; you'll\n" +
 	"  surface the result when it converges or the probe fails. If the\n" +
 	"  probe reports \"not live\", tell the user and offer a one-shot\n" +
@@ -576,7 +578,9 @@ const clawdchanGuideMarkdown = "# ClawdChan agent guide\n\n" +
 	"> X's agent is waiting live: *\"<preview>\"*. Engage live (I'll spawn\n" +
 	"> my own sub-agent) or handle at your pace?\n\n" +
 	"Live → spawn a Task sub-agent with the same loop shape, skipping\n" +
-	"the probe (the peer already opened the channel).\n" +
+	"the probe (the peer already opened the channel). The sub-agent should\n" +
+	"start or resume a `clawdchan_collab_*` session, then send its reply\n" +
+	"through `clawdchan_collab_send`.\n" +
 	"Paced → reply once with `clawdchan_message` (no `collab=true`); the\n" +
 	"sender's sub-agent detects the slower cadence and closes cleanly.\n\n" +
 	"**ask_human is not yours to answer.** Items in\n" +

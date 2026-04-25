@@ -47,6 +47,12 @@ type Store interface {
 	EnqueueOutbox(ctx context.Context, peer identity.NodeID, env envelope.Envelope) error
 	DrainOutbox(ctx context.Context, peer identity.NodeID) ([]envelope.Envelope, error)
 
+	CreateCollabSession(ctx context.Context, s CollabSession) error
+	GetCollabSession(ctx context.Context, sessionID string) (CollabSession, error)
+	ListCollabSessions(ctx context.Context, activeOnly bool) ([]CollabSession, error)
+	UpdateCollabSession(ctx context.Context, s CollabSession) error
+	CloseCollabSession(ctx context.Context, sessionID, status, summary, reason string, nowMs int64) error
+
 	// PurgeConversations wipes threads, envelopes, and outbox. Identity and
 	// peers (pairings) are preserved. Called by hosts that want
 	// session-scoped thread state — e.g. clawdchan-mcp at boot, so a fresh
@@ -62,6 +68,29 @@ type Thread struct {
 	PeerID    identity.NodeID
 	Topic     string
 	CreatedMs int64
+}
+
+// CollabSession is local coordination state for an iterative live-collab loop.
+// It is not a wire-level protocol object; hosts use it to coordinate leases,
+// cursors, round limits, and summaries around the existing message/inbox tools.
+type CollabSession struct {
+	SessionID        string
+	PeerID           identity.NodeID
+	ThreadID         envelope.ThreadID
+	Topic            string
+	Status           string
+	LastCursor       string
+	RoundCount       int
+	MaxRounds        int
+	DefinitionOfDone string
+	Summary          string
+	CloseReason      string
+	OwnerID          string
+	HeartbeatMs      int64
+	LeaseExpiresMs   int64
+	CreatedMs        int64
+	UpdatedMs        int64
+	LastActivityMs   int64
 }
 
 // ErrNotFound is returned by getters when a row does not exist.
@@ -140,6 +169,31 @@ func Open(path string) (Store, error) {
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate openclaw_sessions: %w", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS collab_sessions (
+		session_id         TEXT PRIMARY KEY,
+		peer_id            BLOB NOT NULL,
+		thread_id          BLOB NOT NULL,
+		topic              TEXT NOT NULL,
+		status             TEXT NOT NULL,
+		last_cursor        TEXT NOT NULL,
+		round_count        INTEGER NOT NULL,
+		max_rounds         INTEGER NOT NULL,
+		definition_of_done TEXT NOT NULL,
+		summary            TEXT NOT NULL,
+		close_reason       TEXT NOT NULL,
+		owner_id           TEXT NOT NULL,
+		heartbeat_ms       INTEGER NOT NULL,
+		lease_expires_ms   INTEGER NOT NULL,
+		created_ms         INTEGER NOT NULL,
+		updated_ms         INTEGER NOT NULL,
+		last_activity_ms   INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS collab_sessions_status ON collab_sessions(status, updated_ms);
+	CREATE INDEX IF NOT EXISTS collab_sessions_peer ON collab_sessions(peer_id, updated_ms);
+	`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate collab_sessions: %w", err)
 	}
 	return &sqliteStore{db: db}, nil
 }
@@ -413,6 +467,119 @@ func (s *sqliteStore) DrainOutbox(ctx context.Context, peer identity.NodeID) ([]
 	return envs, nil
 }
 
+func (s *sqliteStore) CreateCollabSession(ctx context.Context, cs CollabSession) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO collab_sessions (
+			session_id, peer_id, thread_id, topic, status, last_cursor,
+			round_count, max_rounds, definition_of_done, summary, close_reason,
+			owner_id, heartbeat_ms, lease_expires_ms, created_ms, updated_ms,
+			last_activity_ms
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, cs.SessionID, cs.PeerID[:], cs.ThreadID[:], cs.Topic, cs.Status, cs.LastCursor,
+		cs.RoundCount, cs.MaxRounds, cs.DefinitionOfDone, cs.Summary, cs.CloseReason,
+		cs.OwnerID, cs.HeartbeatMs, cs.LeaseExpiresMs, cs.CreatedMs, cs.UpdatedMs,
+		cs.LastActivityMs)
+	return err
+}
+
+func (s *sqliteStore) GetCollabSession(ctx context.Context, sessionID string) (CollabSession, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT session_id, peer_id, thread_id, topic, status, last_cursor,
+			round_count, max_rounds, definition_of_done, summary, close_reason,
+			owner_id, heartbeat_ms, lease_expires_ms, created_ms, updated_ms,
+			last_activity_ms
+		FROM collab_sessions
+		WHERE session_id = ?
+	`, sessionID)
+	cs, err := scanCollabSession(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CollabSession{}, ErrNotFound
+	}
+	return cs, err
+}
+
+func (s *sqliteStore) ListCollabSessions(ctx context.Context, activeOnly bool) ([]CollabSession, error) {
+	query := `
+		SELECT session_id, peer_id, thread_id, topic, status, last_cursor,
+			round_count, max_rounds, definition_of_done, summary, close_reason,
+			owner_id, heartbeat_ms, lease_expires_ms, created_ms, updated_ms,
+			last_activity_ms
+		FROM collab_sessions`
+	if activeOnly {
+		query += ` WHERE status IN ('active', 'waiting')`
+	}
+	query += ` ORDER BY updated_ms DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollabSession
+	for rows.Next() {
+		cs, err := scanCollabSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cs)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) UpdateCollabSession(ctx context.Context, cs CollabSession) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE collab_sessions SET
+			peer_id = ?,
+			thread_id = ?,
+			topic = ?,
+			status = ?,
+			last_cursor = ?,
+			round_count = ?,
+			max_rounds = ?,
+			definition_of_done = ?,
+			summary = ?,
+			close_reason = ?,
+			owner_id = ?,
+			heartbeat_ms = ?,
+			lease_expires_ms = ?,
+			created_ms = ?,
+			updated_ms = ?,
+			last_activity_ms = ?
+		WHERE session_id = ?
+	`, cs.PeerID[:], cs.ThreadID[:], cs.Topic, cs.Status, cs.LastCursor,
+		cs.RoundCount, cs.MaxRounds, cs.DefinitionOfDone, cs.Summary, cs.CloseReason,
+		cs.OwnerID, cs.HeartbeatMs, cs.LeaseExpiresMs, cs.CreatedMs, cs.UpdatedMs,
+		cs.LastActivityMs, cs.SessionID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (s *sqliteStore) CloseCollabSession(ctx context.Context, sessionID, status, summary, reason string, nowMs int64) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE collab_sessions SET
+			status = ?,
+			summary = ?,
+			close_reason = ?,
+			updated_ms = ?,
+			last_activity_ms = ?
+		WHERE session_id = ?
+	`, status, summary, reason, nowMs, nowMs, sessionID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
 func (s *sqliteStore) PurgeConversations(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -456,4 +623,33 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func scanCollabSession(r scanner) (CollabSession, error) {
+	var cs CollabSession
+	var peerID, threadID []byte
+	if err := r.Scan(
+		&cs.SessionID,
+		&peerID,
+		&threadID,
+		&cs.Topic,
+		&cs.Status,
+		&cs.LastCursor,
+		&cs.RoundCount,
+		&cs.MaxRounds,
+		&cs.DefinitionOfDone,
+		&cs.Summary,
+		&cs.CloseReason,
+		&cs.OwnerID,
+		&cs.HeartbeatMs,
+		&cs.LeaseExpiresMs,
+		&cs.CreatedMs,
+		&cs.UpdatedMs,
+		&cs.LastActivityMs,
+	); err != nil {
+		return CollabSession{}, err
+	}
+	copy(cs.PeerID[:], peerID)
+	copy(cs.ThreadID[:], threadID)
+	return cs, nil
 }
