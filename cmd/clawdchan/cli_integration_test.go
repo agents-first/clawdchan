@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/agents-first/clawdchan/internal/relayserver"
 )
 
 // TestCLIPairAndSend compiles the two commands and drives a full pair+send+
@@ -194,6 +197,47 @@ func TestCLIPairAndSend(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("bob never observed alice's message. listen log:\n%s", listenOut.String())
+}
+
+func TestCLITryLoopback(t *testing.T) {
+	if testing.Short() {
+		t.Skip("cli integration builds binaries; slow")
+	}
+	repoRoot, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := t.TempDir()
+	clawdchan := filepath.Join(binDir, binaryName("clawdchan"))
+	if err := goBuild(repoRoot, clawdchan, "./cmd/clawdchan"); err != nil {
+		t.Fatalf("build clawdchan: %v", err)
+	}
+
+	relay := httptest.NewServer(relayserver.New(relayserver.Config{PairRendezvousTTL: 5 * time.Second}).Handler())
+	t.Cleanup(relay.Close)
+	relayURL := "ws" + strings.TrimPrefix(relay.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, clawdchan, "try", "-relay", relayURL, "-timeout", "15s")
+	cmd.Env = append(os.Environ(), "CLAWDCHAN_HOME="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clawdchan try: %v\n%s", err, string(out))
+	}
+
+	got := string(out)
+	for _, want := range []string{
+		"[1/5] both ephemeral nodes online",
+		"[3/5] paired",
+		"[5/5] bob received:",
+		"ClawdChan round-trip works.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("clawdchan try output missing %q\n%s", want, got)
+		}
+	}
 }
 
 func findConsumeLine(s string) string {
