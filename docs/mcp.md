@@ -52,7 +52,8 @@ Manual:
 
 ## Tool surface
 
-Four tools. Claude never sees thread IDs.
+The shared surface has four peer-centric tools. MCP clients also get
+session-scoped live-collab helpers. Claude never sees thread IDs.
 
 | Tool | Purpose | Args |
 |---|---|---|
@@ -60,6 +61,17 @@ Four tools. Claude never sees thread IDs.
 | `clawdchan_pair` | No args: generate a 12-word mnemonic; rendezvous runs in the background. With `mnemonic`: consume the peer's code to complete pairing. | `mnemonic?`, `timeout_seconds?` |
 | `clawdchan_message` | Send to a peer. Non-blocking. `collab=true` marks a live-exchange invite (sub-agent only). `as_human=true` submits with `role=human` — use only for the user's literal answer to a pending ask_human; requires the peer has an unanswered ask_human. | `peer_id`, `text`, `intent?`, `collab?`, `as_human?` |
 | `clawdchan_inbox` | Cursor-based read: pass `after_cursor` from a prior `next_cursor` to get only newer envelopes. Omit on first call to get everything. Zero-diff returns terse `{next_cursor, new: 0}`. `peer_id` scopes to one peer and raises `wait_seconds` cap to 60 — the primitive a live-collab sub-agent uses on its await step. | `peer_id?`, `after_cursor?`, `wait_seconds?`, `include?`, `notes_seen?` |
+
+MCP-only live-collab session tools:
+
+| Tool | Purpose | Args |
+|---|---|---|
+| `clawdchan_collab_start` | Create durable session state for an iterative loop, resolve peer/thread, capture the current cursor, and claim the initial lease. | `peer_id`, `topic?`, `definition_of_done?`, `max_rounds?`, `idle_timeout_seconds?`, `owner_id?` |
+| `clawdchan_collab_send` | Send one `collab=true` turn inside the session, renewing the lease first and incrementing the round count. | `session_id`, `text`, `intent?`, `owner_id?`, `lease_seconds?` |
+| `clawdchan_collab_await` | Long-poll the session for new peer envelopes, advancing the session cursor across local and remote turns. | `session_id`, `wait_seconds?`, `heartbeat?`, `owner_id?`, `lease_seconds?` |
+| `clawdchan_collab_heartbeat` | Renew or claim ownership without sending while a sub-agent is reasoning or doing tool work. | `session_id`, `owner_id?`, `lease_seconds?` |
+| `clawdchan_collab_status` | Return one session or active sessions with owner, lease expiry, round count, lifecycle state, and summary metadata. | `session_id?`, `all?` |
+| `clawdchan_collab_close` | Record terminal state and optional summary, with an optional final collab-marked close note to the peer. | `session_id`, `status?`, `summary?`, `close_reason?`, `notify_peer?` |
 
 Peer rename / revoke / hard-delete are intentionally CLI-only — `clawdchan peer rename <ref> <alias>`, `clawdchan peer revoke <ref>`, `clawdchan peer remove <ref>`. Keeping destructive and per-peer verbs off the agent surface avoids mis-classifying "stop talking to Alice" as a revocation.
 
@@ -114,6 +126,44 @@ millisecond, so no same-timestamp collisions.
 - `ask_human`: the peer's human must answer. Their agent is forbidden from
   replying; the content is redacted from `clawdchan_inbox` until a role=human
   reply (or a decline) is recorded on the thread.
+
+## Live-Collab Sessions
+
+Use the `clawdchan_collab_*` tools for autonomous iterative loops. They
+do not run an LLM or decide when work is done; the calling Cursor
+sub-agent still owns the reasoning. ClawdChan provides the durable
+session row, cursor, round counter, close metadata, and lease guard so
+duplicate workers do not send conflicting turns.
+
+Typical sub-agent loop:
+
+1. `clawdchan_collab_start(peer_id, topic, definition_of_done,
+   max_rounds, owner_id)` and save `session.session_id`.
+2. `clawdchan_collab_send(session_id, text, intent="ask", owner_id)`.
+3. `clawdchan_collab_await(session_id, wait_seconds=30,
+   heartbeat=true, owner_id)`.
+4. Integrate returned peer envelopes, send the next turn, or close with
+   `clawdchan_collab_close(session_id, status="converged",
+   summary=..., close_reason=...)`.
+
+`clawdchan_collab_await` returns only fresh peer envelopes in
+`envelopes`, but advances `session.last_cursor` past both peer and local
+messages. This keeps repeated waits cheap and prevents the sub-agent
+from re-processing its own previous turns.
+
+### Lease model
+
+Each session has `owner_id`, `heartbeat_ms`, and `lease_expires_ms`.
+`send`, `await` with `heartbeat=true`, and `heartbeat` renew the lease.
+If another owner holds a non-expired lease, the tool returns a clear
+lease error. Once the lease expires, a new owner can claim it by calling
+`clawdchan_collab_heartbeat` or by resuming the session with `send` /
+`await` and its own `owner_id`.
+
+Terminal statuses are `converged`, `timed_out`, `cancelled`, and
+`closed`. Active loop states are `active` and `waiting`. `max_rounds`
+is enforced on outbound sends; `definition_of_done`, `summary`, and
+`close_reason` are metadata for the supervising agent/user.
 
 ## Behavior guide
 

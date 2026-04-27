@@ -40,6 +40,15 @@ live-exchange invite), `clawdchan_inbox` (cursor-based read; with `peer_id`
 are not exposed — the host resolves peer→thread internally. Destructive /
 per-peer ops (rename, revoke, remove) are CLI-only.
 
+MCP clients now also get first-class live-collab sessions:
+`clawdchan_collab_start`, `clawdchan_collab_send`,
+`clawdchan_collab_await`, `clawdchan_collab_heartbeat`,
+`clawdchan_collab_status`, and `clawdchan_collab_close`. These remain
+MCP-only for now: OpenClaw keeps the four-tool shared surface while Cursor
+sub-agents can coordinate iterative loops through durable session state,
+cursor tracking, max rounds, close summaries, and heartbeat/lease
+ownership.
+
 CC host is reactive: remote `AskHuman` is stored and surfaced on the user's
 next CC turn via `clawdchan_inbox`'s `pending_asks` field. The MCP server
 surfaces the content there specifically so Claude can present it to the
@@ -108,6 +117,8 @@ both surfaces at once.
 
 ## Phase 3 — Follow-ups (deferred)
 
+- Protocol-level session-close / session-presence envelopes for live
+  collab, if the MCP-only coordination model proves useful across hosts.
 - Noise_IK ephemeral session layer for forward secrecy, layered on top of
   the existing AEAD without breaking pairing.
 - libp2p or QUIC transport with relay fallback.

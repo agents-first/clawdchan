@@ -2,10 +2,19 @@ package hosts
 
 import (
 	"bytes"
+	"context"
+	"encoding/hex"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/agents-first/clawdchan/core/envelope"
 	"github.com/agents-first/clawdchan/core/identity"
+	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/pairing"
+	"github.com/agents-first/clawdchan/core/policy"
+	"github.com/agents-first/clawdchan/internal/relayserver"
 )
 
 // TestPendingAsks verifies the ask_human enforcement invariant: a
@@ -196,4 +205,288 @@ func TestCursorDecodeBadHex(t *testing.T) {
 	if _, err := decodeCursor("ab"); err == nil {
 		t.Fatal("expected error for too-short cursor")
 	}
+}
+
+func TestCollabToolsAreMCPOnlyRegistrations(t *testing.T) {
+	n := newHostTestNode(t)
+	for _, reg := range All(n, nil) {
+		if bytes.HasPrefix([]byte(reg.Spec.Name), []byte("clawdchan_collab_")) {
+			t.Fatalf("collab tool %q should not be in shared host surface", reg.Spec.Name)
+		}
+	}
+	regs := CollabSessionTools(n)
+	if len(regs) != 6 {
+		t.Fatalf("expected 6 collab MCP tools, got %d", len(regs))
+	}
+	names := map[string]bool{}
+	for _, reg := range regs {
+		names[reg.Spec.Name] = true
+	}
+	for _, want := range []string{
+		"clawdchan_collab_start",
+		"clawdchan_collab_send",
+		"clawdchan_collab_await",
+		"clawdchan_collab_heartbeat",
+		"clawdchan_collab_status",
+		"clawdchan_collab_close",
+	} {
+		if !names[want] {
+			t.Fatalf("missing collab registration %s", want)
+		}
+	}
+}
+
+func TestCollabSessionHandlersLifecycle(t *testing.T) {
+	ctx := context.Background()
+	n := newHostTestNode(t)
+	peerID, peerIdentity := addHostTestPeer(t, n, "bob")
+
+	start, err := collabStartHandler(n)(ctx, map[string]any{
+		"peer_id":            hex.EncodeToString(peerID[:]),
+		"topic":              "scorer review",
+		"definition_of_done": "agree on patch",
+		"max_rounds":         float64(2),
+		"owner_id":           "agent-a",
+		"lease_seconds":      float64(30),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := start["session"].(map[string]any)
+	sessionID := session["session_id"].(string)
+
+	if _, err := collabHeartbeatHandler(n)(ctx, map[string]any{
+		"session_id":    sessionID,
+		"owner_id":      "agent-b",
+		"lease_seconds": float64(30),
+	}); err == nil {
+		t.Fatal("expected live lease to reject another owner")
+	}
+
+	if _, err := collabSendHandler(n)(ctx, map[string]any{
+		"session_id": sessionID,
+		"text":       "Please review this scorer patch.",
+		"owner_id":   "agent-a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := n.GetCollabSession(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := envelope.Envelope{
+		Version:     envelope.Version,
+		EnvelopeID:  envelope.ULID{0xFE},
+		ThreadID:    cs.ThreadID,
+		From:        envelope.Principal{NodeID: peerID, Role: envelope.RoleAgent, Alias: "bob"},
+		Intent:      envelope.IntentSay,
+		CreatedAtMs: time.Now().UnixMilli(),
+		Content:     envelope.Content{Kind: envelope.ContentDigest, Title: policy.CollabSyncTitle, Body: "Looks good with one nit."},
+	}
+	if err := envelope.Sign(&env, peerIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Store().AppendEnvelope(ctx, env, true); err != nil {
+		t.Fatal(err)
+	}
+
+	await, err := collabAwaitHandler(n)(ctx, map[string]any{
+		"session_id":   sessionID,
+		"wait_seconds": float64(0),
+		"owner_id":     "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if await["new"] != 1 {
+		t.Fatalf("expected one peer envelope, got %v", await)
+	}
+	envelopes := await["envelopes"].([]map[string]any)
+	if envelopes[0]["direction"] != "in" || envelopes[0]["collab"] != true {
+		t.Fatalf("await lost peer/collab envelope details: %+v", envelopes[0])
+	}
+
+	closed, err := collabCloseHandler(n)(ctx, map[string]any{
+		"session_id":   sessionID,
+		"status":       "converged",
+		"summary":      "Reviewed and converged.",
+		"close_reason": "definition_of_done",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedSession := closed["session"].(map[string]any)
+	if closedSession["status"] != node.CollabStatusConverged {
+		t.Fatalf("expected converged close, got %+v", closedSession)
+	}
+}
+
+func TestCollabAwaitTimeoutReturnsNoNewState(t *testing.T) {
+	ctx := context.Background()
+	n := newHostTestNode(t)
+	peerID, _ := addHostTestPeer(t, n, "bob")
+	start, err := collabStartHandler(n)(ctx, map[string]any{
+		"peer_id":  hex.EncodeToString(peerID[:]),
+		"owner_id": "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := start["session"].(map[string]any)["session_id"].(string)
+	await, err := collabAwaitHandler(n)(ctx, map[string]any{
+		"session_id":   sessionID,
+		"wait_seconds": float64(0),
+		"owner_id":     "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if await["new"] != 0 {
+		t.Fatalf("expected no-new timeout response, got %+v", await)
+	}
+	if _, ok := await["next_cursor"].(string); !ok {
+		t.Fatalf("expected next_cursor in no-new response, got %+v", await)
+	}
+}
+
+func TestCollabSessionTwoNodeRoundTrip(t *testing.T) {
+	relay := hostSpinRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	alice, err := node.New(node.Config{DataDir: t.TempDir(), RelayURL: relay, Alias: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = alice.Close() })
+	bob, err := node.New(node.Config{DataDir: t.TempDir(), RelayURL: relay, Alias: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bob.Close() })
+	if err := alice.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	code, pairCh, err := alice.Pair(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bob.Consume(ctx, code.Mnemonic()); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-pairCh; res.Err != nil {
+		t.Fatal(res.Err)
+	}
+
+	bobID := bob.Identity()
+	start, err := collabStartHandler(alice)(ctx, map[string]any{
+		"peer_id":  hex.EncodeToString(bobID[:]),
+		"topic":    "two node",
+		"owner_id": "agent-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := start["session"].(map[string]any)["session_id"].(string)
+	if _, err := collabSendHandler(alice)(ctx, map[string]any{
+		"session_id": sessionID,
+		"text":       "live?",
+		"intent":     "ask",
+		"owner_id":   "agent-a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var bobThread envelope.ThreadID
+	hostEventually(t, 4*time.Second, func() bool {
+		threads, err := bob.ListThreads(ctx)
+		if err != nil {
+			return false
+		}
+		for _, th := range threads {
+			envs, _ := bob.ListEnvelopes(ctx, th.ID, 0)
+			if len(envs) > 0 && envs[0].Content.Body == "live?" {
+				bobThread = th.ID
+				return true
+			}
+		}
+		return false
+	})
+	if err := bob.Send(ctx, bobThread, envelope.IntentSay, envelope.Content{
+		Kind:  envelope.ContentDigest,
+		Title: policy.CollabSyncTitle,
+		Body:  "yes, live.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]any
+	hostEventually(t, 4*time.Second, func() bool {
+		got, err = collabAwaitHandler(alice)(ctx, map[string]any{
+			"session_id":   sessionID,
+			"wait_seconds": float64(0),
+			"owner_id":     "agent-a",
+		})
+		return err == nil && got["new"] == 1
+	})
+	envelopes := got["envelopes"].([]map[string]any)
+	content := envelopes[0]["content"].(map[string]any)
+	if content["body"] != "yes, live." {
+		t.Fatalf("unexpected peer reply: %+v", envelopes[0])
+	}
+}
+
+func newHostTestNode(t *testing.T) *node.Node {
+	t.Helper()
+	n, err := node.New(node.Config{
+		DataDir:  t.TempDir(),
+		RelayURL: "ws://127.0.0.1:1",
+		Alias:    "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = n.Close() })
+	return n
+}
+
+func hostSpinRelay(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(relayserver.New(relayserver.Config{PairRendezvousTTL: 5 * time.Second}).Handler())
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
+func hostEventually(t *testing.T, timeout time.Duration, f func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if f() {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("condition was not met before timeout")
+}
+
+func addHostTestPeer(t *testing.T, n *node.Node, alias string) (identity.NodeID, *identity.Identity) {
+	t.Helper()
+	id, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := pairing.Peer{
+		NodeID:     id.SigningPublic,
+		KexPub:     id.KexPublic,
+		Alias:      alias,
+		Trust:      pairing.TrustPaired,
+		PairedAtMs: time.Now().UnixMilli(),
+	}
+	if err := n.Store().UpsertPeer(context.Background(), peer); err != nil {
+		t.Fatal(err)
+	}
+	return peer.NodeID, id
 }
