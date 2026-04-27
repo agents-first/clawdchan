@@ -74,7 +74,6 @@ func messageHandler(n *node.Node) Handler {
 			return nil, err
 		}
 		out := map[string]any{
-			"ok":         true,
 			"peer_id":    hex.EncodeToString(peerID[:]),
 			"sent_at_ms": time.Now().UnixMilli(),
 			"collab":     collab,
@@ -85,7 +84,7 @@ func messageHandler(n *node.Node) Handler {
 		// free-form agent-role message. Non-blocking hint — the
 		// send already happened.
 		if HasOpenAskHumanFromPeer(ctx, n, peerID) {
-			out["pending_ask_hint"] = "This peer has an unanswered ask_human pending the user. If your text was meant as the user's answer, re-send with as_human=true. If it's an additional agent-level message, disregard this hint."
+			out["pending_ask_hint"] = "Peer has an unanswered ask_human. Re-send with as_human=true if this was the user's answer."
 		}
 		return out, nil
 	}
@@ -105,7 +104,6 @@ func sendAsHuman(ctx context.Context, n *node.Node, peer identity.NodeID, text s
 		return nil, err
 	}
 	return map[string]any{
-		"ok":         true,
 		"peer_id":    hex.EncodeToString(peer[:]),
 		"sent_at_ms": time.Now().UnixMilli(),
 		"as_human":   true,
