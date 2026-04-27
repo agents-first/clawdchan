@@ -45,7 +45,8 @@ type Store interface {
 	ListEnvelopes(ctx context.Context, thread envelope.ThreadID, sinceMs int64) ([]envelope.Envelope, error)
 
 	EnqueueOutbox(ctx context.Context, peer identity.NodeID, env envelope.Envelope) error
-	DrainOutbox(ctx context.Context, peer identity.NodeID) ([]envelope.Envelope, error)
+	ListOutbox(ctx context.Context, peer identity.NodeID) ([]OutboxEntry, error)
+	DeleteOutbox(ctx context.Context, id int64) error
 
 	// PurgeConversations wipes threads, envelopes, and outbox. Identity and
 	// peers (pairings) are preserved. Called by hosts that want
@@ -62,6 +63,13 @@ type Thread struct {
 	PeerID    identity.NodeID
 	Topic     string
 	CreatedMs int64
+}
+
+// OutboxEntry is one queued outbound envelope. ID is the store row id used to
+// delete the entry after a successful send.
+type OutboxEntry struct {
+	ID       int64
+	Envelope envelope.Envelope
 }
 
 // ErrNotFound is returned by getters when a row does not exist.
@@ -371,46 +379,35 @@ func (s *sqliteStore) EnqueueOutbox(ctx context.Context, peer identity.NodeID, e
 	return err
 }
 
-func (s *sqliteStore) DrainOutbox(ctx context.Context, peer identity.NodeID) ([]envelope.Envelope, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *sqliteStore) ListOutbox(ctx context.Context, peer identity.NodeID) ([]OutboxEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, blob FROM outbox WHERE peer_node = ? ORDER BY id ASC`, peer[:])
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id, blob FROM outbox WHERE peer_node = ? ORDER BY id ASC`, peer[:])
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	var envs []envelope.Envelope
+	defer rows.Close()
+
+	var out []OutboxEntry
 	for rows.Next() {
 		var id int64
 		var blob []byte
 		if err := rows.Scan(&id, &blob); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		env, err := envelope.Unmarshal(blob)
 		if err != nil {
-			rows.Close()
 			return nil, err
 		}
-		ids = append(ids, id)
-		envs = append(envs, env)
+		out = append(out, OutboxEntry{ID: id, Envelope: env})
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM outbox WHERE id = ?`, id); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return envs, nil
+	return out, nil
+}
+
+func (s *sqliteStore) DeleteOutbox(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM outbox WHERE id = ?`, id)
+	return err
 }
 
 func (s *sqliteStore) PurgeConversations(ctx context.Context) error {
