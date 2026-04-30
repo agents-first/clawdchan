@@ -203,8 +203,9 @@ CI enforces `go vet`, `gofmt -l .` empty, and the test suite. See
 
 Everyone is welcome — questions, ideas, bug reports, and pull requests
 of every size. We want to hear your feedback. Join the conversation on
-[Discord](https://discord.gg/t8H2MDY2vY) to ask, share your thoughts, or help shape where ClawdChan goes next. Contributions are
-accepted under the project's [MIT License](LICENSE) and held to the
+[Discord](https://discord.gg/t8H2MDY2vY) to ask, share your thoughts, or
+help shape where ClawdChan goes next. Contributions are accepted under
+the project's [MIT License](LICENSE) and held to the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
