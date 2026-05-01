@@ -399,6 +399,28 @@ pre code { background: transparent; border: 0; padding: 0; color: inherit; }
   opacity: .7;
 }
 
+/* Community */
+.community {
+  margin-top: 72px;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+.community h2 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 16px;
+}
+.community p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 16px;
+  line-height: 1.65;
+  text-align: left;
+}
+
 /* Footer */
 footer {
   margin-top: 88px;
