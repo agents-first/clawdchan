@@ -58,6 +58,8 @@ func allAgents() []*agentWiring {
 		codexAgent(),
 		copilotAgent(),
 		cursorAgent(),
+		vscodeAgent(),
+		antigravityAgent(),
 	}
 }
 
@@ -99,15 +101,18 @@ func describeScopeFlag(a *agentWiring, scope string) string {
 }
 
 // mcpScopeChoices returns the MCP-registration scope names the agent
-// supports. Gemini and CC support user+project; Codex and Copilot are
-// user-only (per their upstream docs).
+// supports. Gemini and CC support user+project; the rest are user-only
+// (per their upstream docs).
 func mcpScopeChoices(a *agentWiring) []string {
 	switch a.key {
 	case "cc", "gemini":
 		return []string{"user", "project"}
 	default:
-		// Codex, Copilot, and Cursor are user-scope only. Cursor specifically
-		// ignores project-level .cursor/mcp.json — only ~/.cursor/mcp.json loads.
+		// Codex, Copilot, Cursor, VS Code, and Antigravity are user-scope only.
+		// Cursor specifically ignores project-level .cursor/mcp.json — only
+		// ~/.cursor/mcp.json loads. VS Code and Antigravity also support a
+		// workspace file (.vscode/mcp.json, etc.) but registering at user
+		// scope means a single setup run covers every project the user opens.
 		return []string{"user"}
 	}
 }

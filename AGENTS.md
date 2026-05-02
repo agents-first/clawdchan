@@ -35,7 +35,8 @@ and you **must** pause there — do not bypass prompts or run with
    it themselves** — you should not pipe input into it.
 
    Up front the user picks which MCP hosts to wire: Claude Code,
-   Gemini CLI, Codex CLI, GitHub Copilot CLI, Cursor, or none.
+   Gemini CLI, Codex CLI, GitHub Copilot CLI, Cursor, VS Code,
+   Antigravity, or none.
    OpenClaw is a separate yes/no step later in setup. If Claude Code is
    selected, there are two scope decisions that only the user can make:
 

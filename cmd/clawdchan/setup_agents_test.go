@@ -201,6 +201,98 @@ key = "y"
 	}
 }
 
+// TestMergeJSONMCPServerAt_EmptyFile guards against a real install
+// case: Antigravity (and likely others) create a zero-byte stub
+// mcp_config.json on first run. json.Unmarshal of empty bytes errors
+// with "unexpected end of JSON input"; the helper has to treat
+// zero-length files as if they were "{}".
+func TestMergeJSONMCPServerAt_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_config.json")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mergeJSONMCPServer(path, map[string]any{
+		"command": "/bin/clawdchan-mcp",
+	}, "(user)"); err != nil {
+		t.Fatalf("mergeJSONMCPServer on empty file: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatalf("result not valid JSON: %v\n%s", err, string(data))
+	}
+	servers, _ := obj["mcpServers"].(map[string]any)
+	if _, ok := servers["clawdchan"]; !ok {
+		t.Errorf("clawdchan entry missing: %s", string(data))
+	}
+}
+
+// TestMergeJSONMCPServerAt_VSCodeKey verifies that VS Code's "servers"
+// top-level key is honored end-to-end: the entry lands under "servers",
+// the wrong key "mcpServers" is NOT created as a sibling, and any
+// pre-existing "servers" siblings survive.
+func TestMergeJSONMCPServerAt_VSCodeKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	existing := `{"servers":{"playwright":{"command":"npx","args":["-y","@microsoft/mcp-server-playwright"]}}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mergeJSONMCPServerAt(path, "servers", map[string]any{
+		"command": "/bin/clawdchan-mcp",
+	}, "(user)"); err != nil {
+		t.Fatalf("mergeJSONMCPServerAt: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, wrong := obj["mcpServers"]; wrong {
+		t.Errorf("must not create mcpServers when topKey is servers: %s", string(data))
+	}
+	servers, ok := obj["servers"].(map[string]any)
+	if !ok {
+		t.Fatalf("servers missing: %s", string(data))
+	}
+	if _, ok := servers["playwright"]; !ok {
+		t.Errorf("sibling 'playwright' dropped")
+	}
+	entry, ok := servers["clawdchan"].(map[string]any)
+	if !ok {
+		t.Fatalf("no clawdchan entry: %s", string(data))
+	}
+	if entry["command"] != "/bin/clawdchan-mcp" {
+		t.Errorf("command=%v", entry["command"])
+	}
+}
+
+// TestVSCodeUserMCPPath_Layout pins the mcp.json path under the OS
+// config dir's Code/User folder — the location VS Code uses for
+// user-profile settings.
+func TestVSCodeUserMCPPath_Layout(t *testing.T) {
+	got, err := vscodeUserMCPPath()
+	if err != nil {
+		t.Fatalf("vscodeUserMCPPath: %v", err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(got), "Code/User/mcp.json") {
+		t.Errorf("path = %q, want suffix Code/User/mcp.json", got)
+	}
+}
+
+// TestAntigravityUserMCPPath_Layout pins the gemini-rooted layout
+// documented by Antigravity (.gemini/antigravity/mcp_config.json).
+func TestAntigravityUserMCPPath_Layout(t *testing.T) {
+	got, err := antigravityUserMCPPath()
+	if err != nil {
+		t.Fatalf("antigravityUserMCPPath: %v", err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(got), ".gemini/antigravity/mcp_config.json") {
+		t.Errorf("path = %q, want suffix .gemini/antigravity/mcp_config.json", got)
+	}
+}
+
 // TestAgentRegistryUnique guards against copy-paste mistakes where two
 // agents share a flag name — which would silently break CLI parsing.
 func TestAgentRegistryUnique(t *testing.T) {
