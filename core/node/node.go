@@ -618,14 +618,16 @@ func (n *Node) tryDrainOutbox() {
 		if peer.Trust == pairing.TrustRevoked {
 			continue
 		}
-		envs, err := n.store.DrainOutbox(ctx, peer.NodeID)
+		entries, err := n.store.ListOutbox(ctx, peer.NodeID)
 		if err != nil {
 			continue
 		}
-		for _, env := range envs {
-			delivered, _ := n.deliver(ctx, peer, env)
+		for _, entry := range entries {
+			delivered, _ := n.deliver(ctx, peer, entry.Envelope)
 			if !delivered {
-				_ = n.store.EnqueueOutbox(ctx, peer.NodeID, env)
+				break
+			}
+			if err := n.store.DeleteOutbox(ctx, entry.ID); err != nil {
 				break
 			}
 		}
