@@ -10,10 +10,11 @@ const VENDOR = path.join(__dirname, "..", "vendor");
 
 module.exports = function run(name) {
   const override = process.env.CLAWDCHAN_INSTALL_DIR;
+  const exe = process.platform === "win32" ? `${name}.exe` : name;
   const candidates = [
-    override && path.join(expandHome(override), name),
-    path.join(STABLE, name),
-    path.join(VENDOR, name),
+    override && path.join(expandHome(override), exe),
+    path.join(STABLE, exe),
+    path.join(VENDOR, exe),
   ].filter(Boolean);
 
   const bin = candidates.find((p) => fs.existsSync(p));

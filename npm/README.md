@@ -18,10 +18,9 @@ npx clawdchan@latest setup
 Installation pulls the prebuilt binary matching your platform from GitHub
 Releases and drops it into `~/.clawdchan/bin/` — a stable location that
 survives `npm uninstall`, matches the shell installer, and keeps the
-launchd/systemd service pointing at a path that doesn't move across
-npm upgrades. Supported: macOS (x64, arm64) and Linux (x64, arm64).
-Windows users: grab the zip from the
-[releases page](https://github.com/agents-first/clawdchan/releases).
+launchd/systemd/Scheduled Task service pointing at a path that doesn't move
+across npm upgrades. Supported: macOS (x64, arm64), Linux (x64, arm64), and
+Windows (x64).
 
 Environment variables:
 

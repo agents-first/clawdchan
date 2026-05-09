@@ -35,15 +35,21 @@ const REPO = "agents-first/clawdchan";
 const PKG = require("../package.json");
 const VERSION = process.env.CLAWDCHAN_VERSION || `v${PKG.version}`;
 const VENDOR = path.join(__dirname, "..", "vendor");
-const BINS = ["clawdchan", "clawdchan-mcp", "clawdchan-relay"];
+const BIN_EXT = process.platform === "win32" ? ".exe" : "";
+const BINS = ["clawdchan", "clawdchan-mcp", "clawdchan-relay"].map((b) => `${b}${BIN_EXT}`);
 
-const OS_MAP = { darwin: "macOS", linux: "Linux" };
+const OS_MAP = { darwin: "macOS", linux: "Linux", win32: "Windows" };
 const ARCH_MAP = { x64: "x86_64", arm64: "arm64" };
 
 const osName = OS_MAP[process.platform];
 const archName = ARCH_MAP[process.arch];
 
 if (!osName || !archName) {
+  log(`unsupported platform ${process.platform}/${process.arch} — install from source: https://github.com/${REPO}`);
+  process.exit(0);
+}
+
+if (process.platform === "win32" && process.arch !== "x64") {
   log(`unsupported platform ${process.platform}/${process.arch} — install from source: https://github.com/${REPO}`);
   process.exit(0);
 }
@@ -57,7 +63,8 @@ main().catch((err) => {
 async function main() {
   const tag = await resolveTag(VERSION);
   const version = tag.replace(/^v/, "");
-  const archive = `clawdchan_${version}_${osName}_${archName}.tar.gz`;
+  const archiveExt = process.platform === "win32" ? "zip" : "tar.gz";
+  const archive = `clawdchan_${version}_${osName}_${archName}.${archiveExt}`;
   const base = `https://github.com/${REPO}/releases/download/${tag}`;
 
   log(`downloading clawdchan ${tag} (${osName}_${archName})`);
@@ -78,14 +85,14 @@ async function main() {
 
     const installDir = chooseInstallDir();
     fs.mkdirSync(installDir, { recursive: true });
-    execFileSync("tar", ["-xzf", archivePath, "-C", tmp], { stdio: "ignore" });
+    extractArchive(archivePath, tmp);
 
     for (const b of BINS) {
       const src = path.join(tmp, b);
       if (!fs.existsSync(src)) throw new Error(`missing ${b} in archive`);
       const dst = path.join(installDir, b);
       fs.renameSync(src, dst);
-      fs.chmodSync(dst, 0o755);
+      if (process.platform !== "win32") fs.chmodSync(dst, 0o755);
     }
     log(`installed binaries to ${installDir}`);
 
@@ -95,6 +102,26 @@ async function main() {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+function extractArchive(archivePath, dest) {
+  if (process.platform === "win32") {
+    execFileSync(
+      "powershell",
+      [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "& { param($zip, $dest) Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force }",
+        archivePath,
+        dest,
+      ],
+      { stdio: "ignore" }
+    );
+    return;
+  }
+  execFileSync("tar", ["-xzf", archivePath, "-C", dest], { stdio: "ignore" });
 }
 
 function chooseInstallDir() {
