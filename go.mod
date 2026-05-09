@@ -3,7 +3,7 @@ module github.com/agents-first/clawdchan
 go 1.25.5
 
 require (
-	github.com/fxamacker/cbor/v2 v2.9.1
+	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/mark3labs/mcp-go v0.52.0
 	github.com/mattn/go-isatty v0.0.22
