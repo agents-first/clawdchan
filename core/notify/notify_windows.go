@@ -17,10 +17,10 @@ import (
 // them with proper styling — unlike the legacy ToastText* templates,
 // which collapse everything into a single wrapping line.
 //
-// The notifier is bound to WindowsAppID, which the daemon installer
-// registers in HKCU\Software\Classes\AppUserModelId. Without that
-// registration WinRT rejects the Show() call, so callers should install
-// the daemon first (or run `clawdchan daemon install -force`).
+// The notifier is bound to WindowsAppID, which the daemon installer registers
+// as a Windows toast identity. Without that setup WinRT rejects or silently
+// drops ClawdChan-attributed toasts, so callers should install the daemon
+// first (or run `clawdchan daemon install -force`).
 func dispatch(m Message) error {
 	// Build the toast XML. encoding/xml does proper escaping and
 	// canonicalization — important because title/body are arbitrary

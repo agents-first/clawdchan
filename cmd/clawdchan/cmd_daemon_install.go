@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/mattn/go-isatty"
 
@@ -183,7 +186,7 @@ func daemonStartInstalled() error {
 	case "windows":
 		// Keep the notifier AppID registered before starting so toasts keep working.
 		if err := registerWindowsAppID(); err != nil {
-			fmt.Printf("note: AUMID registration failed (%v); toasts will fall back to defaults\n", err)
+			fmt.Printf("note: Windows toast identity setup failed (%v); notifications may not appear\n", err)
 		}
 		if err := restartWindowsTask(); err != nil {
 			return err
@@ -280,16 +283,19 @@ func installWindowsTask(bin string, force bool) error {
 		return fmt.Errorf("binary path contains spaces (%s); install clawdchan to a path without spaces, or create the Scheduled Task manually with Action = %q, Arguments = 'daemon run', Trigger = At log on", bin, bin)
 	}
 
-	// Register the AUMID *before* firing the test notification. Without this
-	// HKCU entry, WinRT rejects CreateToastNotifier with the ClawdChan id.
+	// Register the Windows toast identity before firing the test notification.
+	// Without it, WinRT rejects or silently drops ClawdChan-attributed toasts.
 	if err := registerWindowsAppID(); err != nil {
-		fmt.Printf("note: AUMID registration failed (%v); toasts will fall back to defaults\n", err)
+		fmt.Printf("note: Windows toast identity setup failed (%v); notifications may not appear\n", err)
 	}
 
 	existing := exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run() == nil
 	if existing && !force {
 		fmt.Printf("already installed: task %q (use -force to overwrite)\n", windowsTaskName)
 	} else {
+		if existing && force {
+			_, _ = exec.Command("schtasks", "/End", "/TN", windowsTaskName).CombinedOutput()
+		}
 		taskRun := fmt.Sprintf(`"%s" daemon run`, bin)
 		args := []string{"/Create",
 			"/TN", windowsTaskName,
@@ -299,8 +305,10 @@ func installWindowsTask(bin string, force bool) error {
 			"/F"}
 		// Pin the task to the current user so schtasks doesn't need admin.
 		// Without /RU, ONLOGON defaults to "any user" which requires elevation.
+		runAsUser := ""
 		if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
-			args = append(args, "/RU", u.Username)
+			runAsUser = u.Username
+			args = append(args, "/RU", runAsUser)
 		}
 		out, err := exec.Command("schtasks", args...).CombinedOutput()
 		if err != nil {
@@ -308,9 +316,12 @@ func installWindowsTask(bin string, force bool) error {
 			// We no longer rely on English-only output strings like "Access is denied",
 			// instead assuming failure for ONLOGON needs elevation (common case).
 			fmt.Println("Scheduled Task creation failed/needs admin — a Windows UAC prompt will appear.")
-			if elevErr := elevatedSchtasksCreate(args); elevErr != nil {
-				return fmt.Errorf("schtasks /Create (elevated): %w (original error: %s)", elevErr, string(out))
+			if elevErr := elevatedWindowsTaskCreate(bin, runAsUser); elevErr != nil {
+				return fmt.Errorf("scheduled task create (elevated): %w (original error: %s)", elevErr, string(out))
 			}
+		}
+		if err := verifyWindowsTaskTarget(bin); err != nil {
+			return err
 		}
 		fmt.Printf("created scheduled task %q\n", windowsTaskName)
 	}
@@ -331,6 +342,17 @@ func restartWindowsTask() error {
 	_, _ = exec.Command("schtasks", "/End", "/TN", windowsTaskName).CombinedOutput()
 	if out, err := exec.Command("schtasks", "/Run", "/TN", windowsTaskName).CombinedOutput(); err != nil {
 		return fmt.Errorf("schtasks /Run: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+func verifyWindowsTaskTarget(bin string) error {
+	out, err := exec.Command("schtasks", "/Query", "/TN", windowsTaskName, "/V", "/FO", "LIST").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
+	}
+	if !strings.Contains(strings.ToLower(string(out)), strings.ToLower(bin)) {
+		return fmt.Errorf("scheduled task %q target did not update to %s", windowsTaskName, bin)
 	}
 	return nil
 }
@@ -561,27 +583,47 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// elevatedSchtasksCreate reruns "schtasks /Create ..." via a UAC-elevated
-// PowerShell launch. Uses -Wait so the caller can proceed only after the
-// elevated process exits, and checks the resulting task exists so a user
-// who dismisses the UAC prompt gets a clear error instead of silent success.
-func elevatedSchtasksCreate(args []string) error {
-	quoted := make([]string, 0, len(args))
-	for _, a := range args {
-		quoted = append(quoted, "'"+strings.ReplaceAll(a, "'", "''")+"'")
-	}
+// elevatedWindowsTaskCreate registers the daemon via the native ScheduledTasks
+// PowerShell API under UAC elevation. schtasks quoting is fragile for /TR values
+// that themselves contain a quoted executable path, and /Create /F can report
+// success while leaving an existing action unchanged. The cmdlet path keeps the
+// executable and arguments separate.
+func elevatedWindowsTaskCreate(bin, runAsUser string) error {
+	script := fmt.Sprintf(`
+$ErrorActionPreference = 'Stop'
+$user = %s
+if ([string]::IsNullOrWhiteSpace($user)) {
+  $user = "$env:USERDOMAIN\$env:USERNAME"
+}
+$action = New-ScheduledTaskAction -Execute %s -Argument 'daemon run'
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet
+Register-ScheduledTask -TaskName %s -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+`, psSingleQuote(runAsUser), psSingleQuote(bin), psSingleQuote(windowsTaskName))
+	encoded := psEncodedCommand(script)
 	ps := fmt.Sprintf(
-		"Start-Process -FilePath 'schtasks.exe' -ArgumentList %s -Verb RunAs -Wait -WindowStyle Hidden",
-		strings.Join(quoted, ","),
+		"$p = Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','%s' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode",
+		encoded,
 	)
 	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("powershell Start-Process: %w: %s", err, string(out))
-	}
-	if err := exec.Command("schtasks", "/Query", "/TN", windowsTaskName).Run(); err != nil {
-		return fmt.Errorf("task %q not present after elevation (UAC likely cancelled)", windowsTaskName)
+		return fmt.Errorf("powershell Register-ScheduledTask: %w: %s", err, string(out))
 	}
 	return nil
+}
+
+func psEncodedCommand(script string) string {
+	u16 := utf16.Encode([]rune(script))
+	buf := make([]byte, len(u16)*2)
+	for i, r := range u16 {
+		binary.LittleEndian.PutUint16(buf[i*2:], r)
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
+func psSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 const launchdPlistTmpl = `<?xml version="1.0" encoding="UTF-8"?>
