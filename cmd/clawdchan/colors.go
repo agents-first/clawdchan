@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/mattn/go-isatty"
 )
@@ -106,10 +107,27 @@ const (
 	// documented for the in-tree OpenClaw host. Change when we adopt
 	// a real brand color.
 	openclawRed = "#E34234"
+	// vscodeBlue is the published "VS Code Blue" used in the product
+	// icon. Source: https://code.visualstudio.com/brand
+	vscodeBlue = "#007ACC"
 )
 
-// agentColor returns the brand hex for an agent key ("cc", "gemini",
-// "codex", "copilot", "openclaw"). Returns "" for unknown keys.
+// antigravityGradient is the per-character color sweep used for
+// Google Antigravity. Antigravity's brand identity is a gradient
+// (pink → purple → blue → cyan → mint), not a single hex; rendering
+// it as an interpolated sweep across the display name is the
+// closest the terminal can get to the actual product mark.
+var antigravityGradient = []string{
+	"#FF5A8A", // rose
+	"#A155F0", // purple
+	"#5B7FFF", // blue
+	"#00C8FF", // cyan
+	"#34F5C5", // mint
+}
+
+// agentColor returns the brand hex for an agent key. Returns "" for
+// unknown keys, or for keys whose brand identity is a gradient rather
+// than a single hex (Antigravity — see antigravityGradient).
 func agentColor(key string) string {
 	switch key {
 	case "cc":
@@ -122,16 +140,22 @@ func agentColor(key string) string {
 		return copilotPurple
 	case "openclaw":
 		return openclawRed
+	case "vscode":
+		return vscodeBlue
 	}
 	return ""
 }
 
 // agentStyle wraps s in bold + the agent's brand color, using 24-bit
 // ANSI truecolor. Falls back to plain bold when color is disabled or
-// the key is unknown.
+// the key is unknown. Antigravity is a gradient, not a single color,
+// so it routes through agentGradient.
 func agentStyle(key, s string) string {
 	if !colorEnabled {
 		return s
+	}
+	if key == "antigravity" {
+		return agentGradient(s, antigravityGradient)
 	}
 	h := agentColor(key)
 	if h == "" {
@@ -142,6 +166,51 @@ func agentStyle(key, s string) string {
 		return bold(s)
 	}
 	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm%s\x1b[0m", r, g, b, s)
+}
+
+// agentGradient renders s with a per-character color sweep across the
+// supplied hex stops, linearly interpolated in RGB. Bold attribute is
+// applied across the whole run so the gradient still reads as a label.
+// Returns plain s when color is disabled, falls back to plain bold on
+// malformed stops or empty input.
+func agentGradient(s string, stops []string) string {
+	if !colorEnabled || len(stops) < 2 {
+		return bold(s)
+	}
+	type rgb struct{ r, g, b int }
+	pal := make([]rgb, 0, len(stops))
+	for _, h := range stops {
+		r, g, b, ok := parseHex(h)
+		if !ok {
+			return bold(s)
+		}
+		pal = append(pal, rgb{r, g, b})
+	}
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return s
+	}
+	var out strings.Builder
+	out.WriteString("\x1b[1m")
+	for i, ch := range runes {
+		pos := 0.0
+		if len(runes) > 1 {
+			pos = float64(i) / float64(len(runes)-1)
+		}
+		seg := pos * float64(len(pal)-1)
+		a := int(seg)
+		b := a + 1
+		if b >= len(pal) {
+			b = len(pal) - 1
+		}
+		t := seg - float64(a)
+		r := pal[a].r + int(float64(pal[b].r-pal[a].r)*t)
+		g := pal[a].g + int(float64(pal[b].g-pal[a].g)*t)
+		bl := pal[a].b + int(float64(pal[b].b-pal[a].b)*t)
+		fmt.Fprintf(&out, "\x1b[38;2;%d;%d;%dm%c", r, g, bl, ch)
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
 }
 
 // parseHex parses a "#RRGGBB" string into 0..255 components.
