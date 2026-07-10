@@ -59,7 +59,8 @@ func paramOption(p hosts.ParamSpec) mcp.ToolOption {
 
 // wrap translates a hosts.Handler into a server.ToolHandlerFunc.
 // Errors go to mcp.NewToolResultError (the mcp-go convention); the
-// success payload is JSON-encoded text.
+// success payload is JSON-encoded text with an approximate token
+// count injected for operator visibility (see #51).
 func wrap(h hosts.Handler) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		params := req.GetArguments()
@@ -74,6 +75,12 @@ func wrap(h hosts.Handler) server.ToolHandlerFunc {
 		if mErr != nil {
 			return mcp.NewToolResultError(mErr.Error()), nil
 		}
+		// Inject approximate token count so operators can measure
+		// per-call cost. The heuristic (1 token ≈ 4 bytes of JSON)
+		// is deliberately conservative; actual tokenizer output
+		// varies by model but this is close enough for profiling.
+		result["_approx_tokens"] = len(b) / 4
+		b, _ = json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(b)), nil
 	}
 }

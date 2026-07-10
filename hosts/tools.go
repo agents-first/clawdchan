@@ -220,8 +220,10 @@ func PendingAsks(envs []envelope.Envelope, me identity.NodeID) map[envelope.ULID
 // agents see. Two derived fields save the agent work: direction
 // ("in"/"out") and collab (true when the content carries the
 // reserved CollabSyncTitle). headersOnly drops the content body for
-// cheap polling over long threads.
-func SerializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool) map[string]any {
+// cheap polling over long threads. dedupeInBucket omits from_node
+// and from_alias when the envelope lives inside a peer bucket that
+// already carries peer_id and alias — saves ~25 tokens per envelope.
+func SerializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly, dedupeInBucket bool) map[string]any {
 	dir := "in"
 	if e.From.NodeID == me {
 		dir = "out"
@@ -229,13 +231,15 @@ func SerializeEnvelope(e envelope.Envelope, me identity.NodeID, headersOnly bool
 	collab := e.Content.Kind == envelope.ContentDigest && e.Content.Title == policy.CollabSyncTitle
 	out := map[string]any{
 		"envelope_id":   hex.EncodeToString(e.EnvelopeID[:]),
-		"from_node":     hex.EncodeToString(e.From.NodeID[:]),
-		"from_alias":    e.From.Alias,
 		"from_role":     RoleName(e.From.Role),
 		"intent":        IntentName(e.Intent),
 		"created_at_ms": e.CreatedAtMs,
 		"direction":     dir,
 		"collab":        collab,
+	}
+	if !dedupeInBucket {
+		out["from_node"] = hex.EncodeToString(e.From.NodeID[:])
+		out["from_alias"] = e.From.Alias
 	}
 	if !headersOnly {
 		out["content"] = ContentPayload(e.Content)
