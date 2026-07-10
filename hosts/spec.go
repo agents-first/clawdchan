@@ -10,7 +10,7 @@ import (
 // SurfaceVersion is reported by clawdchan_toolkit so agents (and
 // debuggers tailing the wire) can tell which revision of the tool
 // surface they're looking at. Bump when the surface changes shape.
-const SurfaceVersion = "0.5"
+const SurfaceVersion = "0.6"
 
 // ParamType enumerates the scalar shapes we describe to a host's
 // native schema format. ClawdChan tool args are either a peer ref

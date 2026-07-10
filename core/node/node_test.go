@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	"github.com/agents-first/clawdchan/core/envelope"
+	"github.com/agents-first/clawdchan/core/identity"
 	"github.com/agents-first/clawdchan/core/node"
+	"github.com/agents-first/clawdchan/core/pairing"
 	"github.com/agents-first/clawdchan/core/surface"
 	"github.com/agents-first/clawdchan/internal/relayserver"
 )
@@ -137,6 +140,46 @@ saySuccess:
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("bob's human was never notified")
+}
+
+func TestCollabHeartbeatLeaseOwnership(t *testing.T) {
+	ctx := context.Background()
+	n := mkNode(t, "ws://127.0.0.1:1", "alice", nil)
+	peerIdentity, _ := identity.Generate()
+	peer := pairing.Peer{
+		NodeID:     peerIdentity.SigningPublic,
+		KexPub:     peerIdentity.KexPublic,
+		Alias:      "bob",
+		Trust:      pairing.TrustPaired,
+		PairedAtMs: time.Now().UnixMilli(),
+	}
+	if err := n.Store().UpsertPeer(ctx, peer); err != nil {
+		t.Fatal(err)
+	}
+	threadID, err := n.OpenThread(ctx, peer.NodeID, "lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := n.CreateCollabSession(ctx, node.CollabCreateOptions{
+		PeerID:        peer.NodeID,
+		ThreadID:      threadID,
+		OwnerID:       "owner-a",
+		LeaseDuration: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.HeartbeatCollabSession(ctx, cs.SessionID, "owner-b", time.Second); !errors.Is(err, node.ErrCollabLeaseHeld) {
+		t.Fatalf("expected live lease rejection, got %v", err)
+	}
+	time.Sleep(70 * time.Millisecond)
+	claimed, err := n.HeartbeatCollabSession(ctx, cs.SessionID, "owner-b", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed.OwnerID != "owner-b" {
+		t.Fatalf("expected owner-b to claim expired lease, got %q", claimed.OwnerID)
+	}
 }
 
 func TestAskHumanRoundTrip(t *testing.T) {

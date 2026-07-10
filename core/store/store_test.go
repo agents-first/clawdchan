@@ -124,6 +124,79 @@ func TestOpenClawSessionPersistence(t *testing.T) {
 	}
 }
 
+func TestCollabSessionLifecycle(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	id, _ := identity.Generate()
+	threadID := envelope.ULID{4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4}
+	now := time.Now().UnixMilli()
+
+	session := CollabSession{
+		SessionID:        "collab-test",
+		PeerID:           id.SigningPublic,
+		ThreadID:         threadID,
+		Topic:            "routing review",
+		Status:           "active",
+		LastCursor:       "cursor-1",
+		MaxRounds:        3,
+		DefinitionOfDone: "agree on next patch",
+		OwnerID:          "agent-a",
+		HeartbeatMs:      now,
+		LeaseExpiresMs:   now + 30_000,
+		CreatedMs:        now,
+		UpdatedMs:        now,
+		LastActivityMs:   now,
+	}
+	if err := s.CreateCollabSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetCollabSession(ctx, "collab-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Topic != session.Topic || got.PeerID != session.PeerID || got.ThreadID != session.ThreadID {
+		t.Fatalf("collab session roundtrip mismatch: %+v", got)
+	}
+
+	got.Status = "waiting"
+	got.LastCursor = "cursor-2"
+	got.RoundCount = 1
+	got.HeartbeatMs = now + 1_000
+	got.LeaseExpiresMs = now + 31_000
+	got.UpdatedMs = now + 1_000
+	got.LastActivityMs = now + 1_000
+	if err := s.UpdateCollabSession(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+
+	active, err := s.ListCollabSessions(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].Status != "waiting" || active[0].RoundCount != 1 {
+		t.Fatalf("active list mismatch: %+v", active)
+	}
+
+	if err := s.CloseCollabSession(ctx, "collab-test", "converged", "done", "definition_of_done", now+2_000); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := s.GetCollabSession(ctx, "collab-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Status != "converged" || closed.Summary != "done" || closed.CloseReason != "definition_of_done" {
+		t.Fatalf("close mismatch: %+v", closed)
+	}
+	active, err = s.ListCollabSessions(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("expected no active sessions after close, got %d", len(active))
+	}
+}
+
 func TestThreadAndEnvelopes(t *testing.T) {
 	s := openTemp(t)
 	ctx := context.Background()

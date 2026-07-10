@@ -3,10 +3,11 @@ description: Work with ClawdChan — pair with a peer, message them, or surface 
 ---
 
 You have the ClawdChan MCP tools (`clawdchan_*`). The surface is
-peer-centric and deliberately small: four tools cover everything —
+peer-centric and deliberately small: four core tools cover one-shot work —
 `clawdchan_toolkit`, `clawdchan_pair`, `clawdchan_message`,
-`clawdchan_inbox`. Thread IDs never surface. This file is your
-operator manual — how to act, not what the tools do.
+`clawdchan_inbox`. MCP clients also have first-class live-collab
+session tools named `clawdchan_collab_*`. Thread IDs never surface.
+This file is your operator manual — how to act, not what the tools do.
 
 ## First action every session
 
@@ -47,23 +48,24 @@ it to the user and do nothing.
   your own turn; it freezes the user. Brief the sub-agent:
 
   > You own a live ClawdChan collaboration with peer_id `<hex>`
-  > about `<problem>`. First action is a **liveness probe**:
-  > `clawdchan_message(peer, text="<one-line 'live on <topic>?'
-  > check>", intent='ask', collab=true)` →
-  > `clawdchan_inbox(peer_id=<hex>, wait_seconds=15)`. If the poll
-  > returns `new: 0`, exit with "peer not live on this" — do not
-  > keep sending. If it returns fresh envelopes from the peer,
-  > record the `next_cursor` and enter the loop:
-  > `clawdchan_message(peer, text, intent='ask', collab=true)` →
-  > `clawdchan_inbox(peer_id=<hex>, wait_seconds=<T>,
-  > after_cursor=<last next_cursor>)` → integrate → respond. Size
-  > `<T>` to the work: ~10s for quick clarifications, 30–60s for
-  > design-level turns — not a fixed 10s. Converge on `<definition
-  > of done>`. Stop after `<N>` rounds, 2–3 consecutive empty polls
-  > ("peer went silent"), or any error. Return a summary: what was
-  > agreed, open questions, closing message. Do not ask the user
-  > anything. Always set `collab=true` on outbound — that tags the
-  > envelope so the peer knows a sub-agent is waiting.
+  > about `<problem>`. Pick a stable `owner_id` for yourself, then
+  > call `clawdchan_collab_start(peer_id=<hex>, topic=<topic>,
+  > definition_of_done=<done>, max_rounds=<N>, owner_id=<owner>)`.
+  > Send the liveness probe with
+  > `clawdchan_collab_send(session_id, text="<one-line live on
+  > <topic>? check>", intent="ask", owner_id=<owner>)`, then
+  > `clawdchan_collab_await(session_id, wait_seconds=15,
+  > heartbeat=true, owner_id=<owner>)`. If it returns `new: 0`,
+  > close with `status="timed_out"` and summary "peer not live on
+  > this" — do not keep sending. If it returns fresh peer envelopes,
+  > enter the loop: integrate → `clawdchan_collab_send` →
+  > `clawdchan_collab_await`. Size waits to the work: ~10s for quick
+  > clarifications, 30–60s for design-level turns. Converge on
+  > `<definition of done>`. Stop after `<N>` rounds, 2–3 consecutive
+  > empty polls ("peer went silent"), a lease error, or any tool
+  > error. Close with `clawdchan_collab_close(session_id, status,
+  > summary, close_reason)` and return the same summary to the main
+  > agent. Do not ask the user anything.
 
   Free the main turn. Tell the user the loop is running; you'll
   surface the result when it converges or the probe fails. If the
@@ -79,7 +81,9 @@ user first:
 > my own sub-agent) or handle at your pace?
 
 Live → spawn a Task sub-agent with the same loop shape, skipping
-the probe (the peer already opened the channel).
+the probe (the peer already opened the channel). The sub-agent should
+start or resume a `clawdchan_collab_*` session, then send its reply
+through `clawdchan_collab_send`.
 Paced → reply once with `clawdchan_message` (no `collab=true`); the
 sender's sub-agent detects the slower cadence and closes cleanly.
 
