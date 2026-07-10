@@ -11,12 +11,15 @@ operator manual — how to act, not what the tools do.
 ## First action every session
 
 Call `clawdchan_toolkit`. It returns `self`, the list of paired
-`peers` with per-peer stats, and a `setup.user_message`. If
-`setup.needs_persistent_listener` is true, surface that message
-verbatim and pause — a running `clawdchan daemon` is what fires the
-OS toasts that pull the user back into this session when a peer
-messages them. Without it, inbound only arrives while this session
-is open, and nothing notifies the user.
+`peers` with per-peer stats, and a `setup.user_message`.
+
+1. If `setup.needs_persistent_listener` is true, surface that message
+   verbatim and pause — a running `clawdchan daemon` is what fires the
+   OS toasts that pull the user back into this session when a peer
+   messages them. Without it, inbound only arrives while this session
+   is open, and nothing notifies the user.
+2. Check the returned `peers` list. If any peer has `inbound_count > 0`
+   or `pending_asks > 0`, immediately tell the user: *"You have unread messages from `<alias>`"* and ask if they'd like you to fetch them with `clawdchan_inbox`.
 
 ## Conduct rules
 

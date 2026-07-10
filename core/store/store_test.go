@@ -185,16 +185,23 @@ func TestOutbox(t *testing.T) {
 	if err := s.EnqueueOutbox(ctx, peer.SigningPublic, env); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.DrainOutbox(ctx, peer.SigningPublic)
+	got, err := s.ListOutbox(ctx, peer.SigningPublic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Content.Text != "queued" {
+	if len(got) != 1 || got[0].Envelope.Content.Text != "queued" {
 		t.Fatalf("drain mismatch: %+v", got)
 	}
-	empty, _ := s.DrainOutbox(ctx, peer.SigningPublic)
+	again, _ := s.ListOutbox(ctx, peer.SigningPublic)
+	if len(again) != 1 {
+		t.Fatalf("list should not delete outbox entries, got %d", len(again))
+	}
+	if err := s.DeleteOutbox(ctx, got[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	empty, _ := s.ListOutbox(ctx, peer.SigningPublic)
 	if len(empty) != 0 {
-		t.Fatalf("expected empty after drain, got %d", len(empty))
+		t.Fatalf("expected empty after delete, got %d", len(empty))
 	}
 }
 
@@ -266,9 +273,9 @@ func TestPurgeConversations(t *testing.T) {
 		t.Fatalf("expected 0 envelopes after purge, got %d", len(es))
 	}
 	// Outbox gone.
-	drained, _ := s.DrainOutbox(ctx, peer.NodeID)
-	if len(drained) != 0 {
-		t.Fatalf("expected 0 outbox entries after purge, got %d", len(drained))
+	outbox, _ := s.ListOutbox(ctx, peer.NodeID)
+	if len(outbox) != 0 {
+		t.Fatalf("expected 0 outbox entries after purge, got %d", len(outbox))
 	}
 	// Identity survives.
 	if _, err := s.LoadIdentity(ctx); err != nil {
